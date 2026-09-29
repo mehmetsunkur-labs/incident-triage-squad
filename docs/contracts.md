@@ -194,8 +194,12 @@ so they are not part of any structured-output schema.
 | `error` | string or null | Exception text for `failed` and `timeout`. |
 | `tool_calls` | integer | |
 | `queries` | array of string | Every query sent to the tool, in order. It feeds the runbook `why` when nothing matched, and the debrief. |
-| `started_at`, `finished_at` | date-time | Used to check concurrency (self-check #2). |
+| `started_at`, `finished_at` | date-time | Wall-clock times for `result.md`. The grader's concurrency check reads the trace (§9), not these. |
 | `result` | object or null | |
+
+Faults injected with the D10 flags show up here like real ones: `--fail-agent` gives
+`failed`, `--delay-agent` past the timeout gives `timeout`, and `--empty-tool` gives `ok`
+with empty findings.
 
 ---
 
@@ -220,6 +224,14 @@ change records or evidence ids: the runbook lookup sees the symptom only.
 | `symptom` | string | From `failure_mode` plus the key observations. Describes the symptom, not the cause. |
 | `service` | string or null | |
 | `observed[]` | `{key, value}` | Attribute values that help pick between entries. |
+
+**When there is no symptom.** If the log analyst's run is `failed` or `timeout`, or it
+returned no `failure_mode`, no runbook input is built and the lookup is skipped (D7). The
+runbook lookup never gets the historian's output or the raw report as a substitute.
+
+**Component runs.** `triage eval-runbook` (D10) builds this object from a bare symptom
+string: `{"symptom": "<text>", "service": null, "observed": []}`. The lookup must work from
+`symptom` alone.
 
 Decide deliberately whether the suspected cause belongs in `symptom`. The brief says the
 lookup gets a symptom description; including the cause makes matching easier but also
@@ -366,3 +378,43 @@ writes none of it directly.
 
 The finished object is validated against a `TriageResult` pydantic model written from
 `output-contract.md` (self-check #8).
+
+---
+
+## 9. Trace events
+
+`trace.jsonl` in each run folder (D8). The format is the one `agentic_exercise_grader`
+reads, so `grade.py run ... --trace trace.jsonl` works unchanged. One JSON object per line:
+
+```json
+{"ts": 0.00, "agent": "log_analyst", "type": "start"}
+{"ts": 0.01, "agent": "log_analyst", "type": "input", "payload": "<full prompt text>"}
+{"ts": 0.80, "agent": "log_analyst", "type": "tool_call", "tool": "search_logs", "query": "timeout"}
+{"ts": 4.20, "agent": "log_analyst", "type": "end", "status": "ok", "input_tokens": 5120, "output_tokens": 830}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `ts` | number | Seconds since the run started (`time.monotonic()` offset). Not an ISO string: the grader does arithmetic on it. |
+| `agent` | enum | `log_analyst`, `change_historian`, `runbook_lookup`, `comms_drafter`, `synthesis` |
+| `type` | enum | `start`, `end`, `tool_call`, `input`, and any of our own (e.g. `model_call`, `error`) |
+| `tool` | string | On `tool_call` only. Must be the agent's own tool. |
+| `payload` | string | On `input` only: the exact text the agent received, system prompt plus user message. |
+
+The grader's checks, and what they need from us:
+
+- **Concurrency:** `log_analyst` and `change_historian` each have a `start` and an `end`,
+  and their spans overlap. `end` is written in a `finally`, including on failure and
+  timeout.
+- **Tool sandboxing:** every `tool_call` names the agent's own tool. `synthesis` makes no
+  tool calls.
+- **Context sandboxing,** checked against `payload`:
+  - `log_analyst` must not contain `CHG-nnnn`.
+  - `change_historian` must not contain an ISO timestamp (`2026-01-01T10:00:00Z`) or
+    `file.log:n`.
+  - `runbook_lookup` must contain none of these.
+
+  Prompt files must avoid these patterns in their examples too, because the whole prompt
+  is logged.
+
+Extra fields (`query`, `status`, token counts) are ours; the grader ignores them.
