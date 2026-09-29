@@ -1,11 +1,11 @@
 """Specialist specs (D2). Each agent is one SpecialistSpec plus one prompt file.
 
-Step 6b defined the log analyst and step 7 the change historian; step 8 adds the runbook
-lookup here, and step 9 the synthesis spec.
+Steps 6b, 7 and 8 defined the log analyst, the change historian and the runbook lookup;
+step 9 adds the synthesis spec.
 """
 
 from .agent import SpecialistSpec
-from .schemas import ChangeHistorianResult, LogAnalystResult, SpecialistInput
+from .schemas import ChangeHistorianResult, LogAnalystResult, RunbookInput, RunbookResult, SpecialistInput
 
 # contracts §1: the same fixed text for every incident.
 HYPOTHESES_NOTE = (
@@ -54,4 +54,31 @@ CHANGE_HISTORIAN = SpecialistSpec(
     ),
 )
 
-SPECS = {s.agent: s for s in (LOG_ANALYST, CHANGE_HISTORIAN)}
+def runbook_user_message(inp: RunbookInput) -> str:
+    """The symptom only (D4, contracts §5). RunbookInput already rejects log lines, change
+    ids and ISO timestamps, the patterns the grader's leak check looks for."""
+    lines = [f"Symptom: {inp.symptom.strip()}"]
+    if inp.service:
+        lines.append(f"Service: {inp.service}")
+    if inp.observed:
+        lines.append("Observed: " + "; ".join(f"{o.key}={o.value}" for o in inp.observed))
+    return "\n".join(lines)
+
+
+RUNBOOK_LOOKUP = SpecialistSpec(
+    agent="runbook_lookup",
+    prompt_file="runbook_lookup.md",
+    output_model=RunbookResult,
+    user_message=runbook_user_message,
+    tool="search_runbook",
+    tool_description=(
+        "Search every operations runbook, including the _archive/ folder. Each result is one "
+        "entry: its id, title, source file path and full text. The query is split on "
+        "whitespace and an entry matches only if every term appears somewhere in it as a "
+        "case-insensitive substring: no regex, stemming or synonyms. At most 3 results, "
+        "ordered by entry id, not by relevance; total_matches larger than returned means "
+        "there are more."
+    ),
+)
+
+SPECS = {s.agent: s for s in (LOG_ANALYST, CHANGE_HISTORIAN, RUNBOOK_LOOKUP)}

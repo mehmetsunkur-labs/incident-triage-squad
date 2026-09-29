@@ -154,3 +154,44 @@ def test_historian_inc_2043_citations_and_input(settings, tmp_path):
     assert events[-1]["init_tools"] == ["StructuredOutput", "mcp__triage__search_changes"]
     payload = next(e for e in events if e["type"] == "input")["payload"]
     assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z|\.log:\d+", payload)
+
+
+def _entry_texts(settings):
+    from triage.corpus import split_sections
+    return {s.id: " ".join(s.body.split())
+            for p in (settings.data_dir / "runbook").rglob("*.md") for s in split_sections(p.read_text())}
+
+
+def _check_runbook_run(r, texts):
+    assert r.status in ("ok", "partial"), r.error
+    x = r.result
+    ids = {c.id for c in x.considered} | ({x.matched.id} if x.matched else set()) | (
+        {x.fallback.id} if x.fallback else set())
+    assert ids <= set(r.evidence_seen)
+    source, steps = (x.matched.id, x.remediation) if x.matched else (x.fallback.id, x.fallback.steps)
+    assert steps and all(" ".join(s.split()) in texts[source] for s in steps)
+    return x
+
+
+def test_runbook_match_is_current_with_verbatim_steps(settings, tmp_path):
+    """Step 8, structure only: a match is a current entry, and its steps are copied exactly."""
+    from triage.schemas import RunbookInput
+    from triage.specialists import RUNBOOK_LOOKUP
+    inp = RunbookInput(symptom="Requests time out waiting for a database connection; the pool is "
+                       "saturated with rising waiters; the database is healthy and lightly loaded.",
+                       service=None, observed=[])
+    r, events = run(settings, tmp_path, RUNBOOK_LOOKUP, inp)
+    x = _check_runbook_run(r, _entry_texts(settings))
+    assert x.matched is not None and not x.matched.source.startswith("_archive/")
+    assert events[-1]["init_tools"] == ["StructuredOutput", "mcp__triage__search_runbook"]
+
+
+def test_runbook_no_match_falls_back(settings, tmp_path):
+    """A symptom no runbook covers: no match, and the no-match entry as the fallback."""
+    from triage.schemas import RunbookInput
+    from triage.specialists import RUNBOOK_LOOKUP
+    inp = RunbookInput(symptom="The office coffee machine shows a descaling error on its display.",
+                       service=None, observed=[])
+    r, _ = run(settings, tmp_path, RUNBOOK_LOOKUP, inp)
+    x = _check_runbook_run(r, _entry_texts(settings))
+    assert x.matched is None and x.remediation == [] and x.fallback is not None

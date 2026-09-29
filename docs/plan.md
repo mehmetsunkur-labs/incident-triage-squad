@@ -13,10 +13,10 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 **Who builds what.** Claude built the plumbing: steps 0, 2, 3 and 4, the fault-injection
 flags from step 11, the `run`, `eval-tools` and `eval-runbook` commands, `result.md`
 rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote steps
-6b (the specialist loop and the log analyst prompt) and 7 (the change historian) for you to
-review. You write the rest
-of what the exercise teaches: the runbook lookup's prompt, join, guardrails, synthesis
-and assembly (steps 8 to 10), then run the variants and iteration prompts (steps 11 and
+6b (the specialist loop and the log analyst prompt), 7 (the change historian) and 8 (the
+runbook lookup) for you to review. You write the rest
+of what the exercise teaches: join, guardrails, synthesis and assembly (steps 9 and
+10), then run the variants and iteration prompts (steps 11 and
 12). The write-up should say which parts Claude wrote. Your entry points are the two stubs
 in `src/triage/orchestrator.py`.
 
@@ -32,7 +32,8 @@ in `src/triage/orchestrator.py`.
 | 6a SDK spike for the loop | done (D11), by Claude |
 | 6b Loop and log analyst | written by Claude, awaiting your review |
 | 7 Change historian | written by Claude, awaiting your review |
-| 8 to 10 | yours |
+| 8 Runbook lookup | written by Claude, awaiting your review: `grade.py runbook` 7/7 |
+| 9, 10 | yours |
 | 11 Faults and variants | flags done; running the variants is yours |
 | 12, 13 | yours |
 
@@ -240,6 +241,17 @@ what a fourth specialist would cost.
 **Done when:** `python3 $G runbook out/runbook.json` passes every case, including the
 no-match case and the vague-symptom case that word-matches the archive.
 
+Written by Claude at your request, for you to review. Built:
+- the `RUNBOOK_LOOKUP` spec and `runbook_user_message` in `specialists.py`
+- `prompts/runbook_lookup.md`
+- `orchestrator.lookup_runbook`
+- `debug-agent runbook_lookup --symptom ...`
+- `eval-runbook` running cases concurrently (`--concurrency`, default 3) and saving each run
+- 3 fast tests and 2 slow ones
+
+`agent.py` again needed no change. The first `grade.py runbook` run passed 7/7 with no
+tuning.
+
 ## Step 9. Orchestrator
 
 In order:
@@ -255,7 +267,8 @@ In order:
 4. **Synthesis.** One call with the §7 input and no tools.
 5. **Guardrails** (`guardrails.py`). Remove citations missing from this run's tool
    results (the union of every run's `evidence_seen`), reject a `LEG-` match, and check
-   remediation is verbatim. Record each violation
+   remediation is verbatim. Compare with whitespace normalised: runbook entries break
+   lines mid-sentence, and the lookup joins them (step 8). Record each violation
    in the trace and in `open_questions` (D6).
 6. **Assemble** `TriageResult` per §8, validate it, write `result.json` and `result.md`,
    and print the timing summary.

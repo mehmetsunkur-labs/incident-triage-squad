@@ -22,5 +22,5 @@ is needed. Design: [docs/decisions.md](docs/decisions.md), [docs/contracts.md](d
 [docs/plan.md](docs/plan.md).
 
 Run one specialist alone while working on it: `uv run triage debug-agent log_analyst INC-2043`
-(or `change_historian`).
+(or `change_historian`; `runbook_lookup` takes `--symptom "..."`).
 Tests that call the model are marked slow and skipped by default: `uv run pytest -m slow`.

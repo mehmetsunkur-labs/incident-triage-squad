@@ -104,9 +104,13 @@ def debug_agent(
     delay_agent: list[str] = DELAY_AGENT,
     max_tool_calls: int | None = MAX_TOOL_CALLS,
     timeout: float | None = typer.Option(None, "--timeout", help="Override the stage timeout, seconds"),
+    symptom: str | None = typer.Option(None, "--symptom", help="runbook_lookup only: the symptom to look up"),
     data_dir: str | None = DATA_DIR,
 ):
-    """Run one specialist alone on one incident (plan step 6b). Writes <agent>.json and trace.jsonl."""
+    """Run one specialist alone on one incident. Writes <agent>.json and trace.jsonl.
+
+    runbook_lookup takes --symptom instead of the incident report; the incident id only
+    names the run folder."""
     from . import specialists
     from .agent import run_specialist
 
@@ -119,15 +123,19 @@ def debug_agent(
     overrides = {k: v for k, v in (("max_tool_calls", faults.max_tool_calls), ("specialist_timeout_s", timeout)) if v}
     settings = dataclasses.replace(settings, **overrides)
     try:
-        report = read_incident(settings.data_dir, incident_id)
-    except ConfigError as e:
-        typer.echo(f"config error: {e}", err=True)
+        if agent == "runbook_lookup":
+            if not symptom:
+                raise ConfigError("runbook_lookup needs --symptom")
+            context = RunbookInput(symptom=symptom, service=None, observed=[])
+        else:
+            context = specialists.specialist_input(incident_id, read_incident(settings.data_dir, incident_id))
+    except (ConfigError, ValueError) as e:
+        typer.echo(f"input error: {e}", err=True)
         raise typer.Exit(2)
 
     run_dir = new_run_dir(settings.out_dir, f"{incident_id}-{agent}")
     trace = Trace(run_dir / "trace.jsonl")
-    run = asyncio.run(run_specialist(spec, specialists.specialist_input(incident_id, report),
-                                     settings, faults, trace))
+    run = asyncio.run(run_specialist(spec, context, settings, faults, trace))
     (run_dir / f"{agent}.json").write_text(run.model_dump_json(indent=2) + "\n")
     typer.echo(f"run folder: {run_dir}")
     typer.echo(timing_summary(trace.path))
@@ -140,20 +148,31 @@ def debug_agent(
 def eval_runbook(
     variants_json: Path = typer.Argument(..., exists=True, help="The grader's golden/variants.json"),
     out: Path = typer.Option(Path("out/runbook.json"), "-o", "--out"),
+    concurrency: int = typer.Option(3, "--concurrency", help="Cases run at the same time"),
     data_dir: str | None = DATA_DIR,
 ):
     """Run the runbook lookup on each case's symptom alone; write {case id: matched id or null}."""
     settings = _settings(data_dir)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    trace_dir = settings.out_dir / "eval-runbook" / stamp
-    results = {}
-    for case_id, symptom in evals.runbook_symptoms(variants_json).items():
-        trace = Trace(trace_dir / f"{case_id}.trace.jsonl")
-        runbook_input = RunbookInput(symptom=symptom, service=None, observed=[])
-        run = asyncio.run(orchestrator.lookup_runbook(runbook_input, settings, faults_mod.NO_FAULTS, trace))
-        if run.result is None:
-            results[case_id] = f"ERROR: {run.status} {run.error or ''}".strip()
-        else:
-            results[case_id] = run.result.matched.id if run.result.matched else None
-        typer.echo(f"  {case_id:22} {results[case_id]}")
+    run_dir = settings.out_dir / "eval-runbook" / stamp
+    cases = evals.runbook_symptoms(variants_json)
+    limit = asyncio.Semaphore(concurrency)
+
+    async def one(case_id: str, symptom: str):
+        async with limit:
+            trace = Trace(run_dir / f"{case_id}.trace.jsonl")
+            runbook_input = RunbookInput(symptom=symptom, service=None, observed=[])
+            run = await orchestrator.lookup_runbook(runbook_input, settings, faults_mod.NO_FAULTS, trace)
+            (run_dir / f"{case_id}.json").write_text(run.model_dump_json(indent=2) + "\n")
+            if run.result is None:
+                return case_id, f"ERROR: {run.status} {run.error or ''}".strip()
+            return case_id, run.result.matched.id if run.result.matched else None
+
+    async def all_cases():
+        return await asyncio.gather(*(one(c, s) for c, s in cases.items()))
+
+    results = dict(asyncio.run(all_cases()))
+    for case_id, matched in results.items():
+        typer.echo(f"  {case_id:22} {matched}")
+    typer.echo(f"runs and traces: {run_dir}")
     _write(results, out)
