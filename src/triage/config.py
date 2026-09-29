@@ -44,4 +44,17 @@ def resolve_data_dir(value: str | None = None) -> Path:
 
 
 def load_settings(data_dir: str | None = None, **overrides) -> Settings:
-    return Settings(data_dir=resolve_data_dir(data_dir), **overrides)
+    """Settings from .env; TRIAGE_OUT_DIR, if set, moves the output folder."""
+    data = resolve_data_dir(data_dir)
+    if (out := os.environ.get("TRIAGE_OUT_DIR")) and "out_dir" not in overrides:
+        overrides["out_dir"] = Path(out).resolve()
+    return Settings(data_dir=data, **overrides)
+
+
+def read_incident(data_dir: Path, incident_id: str) -> str:
+    """The incident report, verbatim (D4)."""
+    path = data_dir / "incidents" / f"{incident_id}.md"
+    if not path.is_file():
+        known = sorted(p.stem for p in (data_dir / "incidents").glob("*.md"))
+        raise ConfigError(f"no incident {incident_id!r}; known: {', '.join(known)}")
+    return path.read_text()

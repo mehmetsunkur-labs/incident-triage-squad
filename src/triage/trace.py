@@ -82,3 +82,25 @@ def new_run_dir(out_dir: Path, incident_id: str) -> Path:
         path = base.with_name(f"{base.name}-{n}")
     path.mkdir(parents=True)
     return path
+
+
+def timing_summary(path: Path) -> str:
+    """Per-agent durations and the fan-out overlap, read back from trace.jsonl."""
+    spans: dict[str, list[float | None]] = {}
+    for line in path.read_text().splitlines():
+        e = json.loads(line)
+        s = spans.setdefault(e["agent"], [None, None, None])
+        if e["type"] == "start":
+            s[0] = e["ts"]
+        elif e["type"] == "end":
+            s[1], s[2] = e["ts"], e.get("status")
+    lines = []
+    for agent, (start, end, status) in spans.items():
+        took = f"{end - start:6.1f}s" if start is not None and end is not None else "   open"
+        lines.append(f"  {agent:17} {took}  {status or ''}")
+    la, ch = spans.get("log_analyst"), spans.get("change_historian")
+    if la and ch and None not in (la[0], la[1], ch[0], ch[1]):
+        overlap = min(la[1], ch[1]) - max(la[0], ch[0])
+        wall = max(la[1], ch[1]) - min(la[0], ch[0])
+        lines.append(f"  fan-out wall {wall:.1f}s, specialists overlapped {max(overlap, 0):.1f}s")
+    return "\n".join(lines)

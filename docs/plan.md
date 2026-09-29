@@ -10,6 +10,24 @@ how to check it, not how to write it.
 
 Runbook input carries the symptom only, never the suspected cause (contracts §5).
 
+**Who builds what.** Claude built the plumbing: steps 0, 2, 3 and 4, the fault-injection
+flags from step 11, and the `run`, `eval-tools` and `eval-runbook` commands. You write the
+parts the exercise teaches: the agent loop, prompts, specialists, join, guardrails,
+synthesis and assembly (steps 6 to 10), then run the variants and iteration prompts
+(steps 11 and 12). Your entry points are the two stubs in `src/triage/orchestrator.py`.
+
+| Step | Status |
+|---|---|
+| 0 Setup | done |
+| 1 Benchmark | yours |
+| 2 Tools | done: `grade.py tools` passes 31/31 |
+| 3 Schemas | done |
+| 4 Trace | done |
+| 5 SDK spike | done (D11) |
+| 6 to 10 | yours |
+| 11 Faults and variants | flags done; running the variants is yours |
+| 12, 13 | yours |
+
 ---
 
 ## Layout
