@@ -14,7 +14,8 @@ Stack: Python, uv project, run locally as a CLI.
 ## D1. Runtime and framework
 
 - **Question:** Language, raw SDK vs framework, model per agent.
-- **Status:** decided
+- **Status:** revisited, amended by D11 (model access goes through the Claude Agent SDK;
+  the rest stands)
 - **Decision:**
   - uv project, `src/` layout; `typer` CLI, `pydantic` schemas, `python-dotenv` for
     `TRIAGE_DATA_DIR`. Entry point in `[project.scripts]`: `uv run triage INC-2043`.
@@ -30,7 +31,8 @@ Stack: Python, uv project, run locally as a CLI.
 ## D2. Reusable specialist loop
 
 - **Question:** What parameterises one generic agent loop?
-- **Status:** decided
+- **Status:** revisited, amended by D11 (the SDK drives the loop; the `run_specialist`
+  interface, caps and partial results stand)
 - **Decision:**
   - One `run_specialist(spec, context) -> Result`. `spec` is a dataclass: prompt path, one
     tool (definition + callable), output model, `max_tool_calls`, timeout.
@@ -194,3 +196,50 @@ Stack: Python, uv project, run locally as a CLI.
 - **Why:** The variants require the harness to change behaviour, so injection has to be
   designed in rather than bolted on. Keeping goldens out of the system stops prompts being
   tuned to the answer key instead of the data.
+
+## D11. Model access through the Claude Agent SDK
+
+- **Question:** How do agents reach the model without Console API access?
+- **Status:** decided
+- **Decision:**
+  - **Backend.** Use the `claude-agent-sdk` package with the local Claude Code login. No
+    API key or token in `.env`. It is used only inside `run_specialist` and the synthesis
+    call, behind the same interface, so a later switch to the raw `anthropic` SDK doesn't
+    touch the orchestrator, join, guardrails or assembly.
+  - **Amends D1:** no `AsyncAnthropic` client. The model is set through the SDK options.
+    Keep `effort` in `config.py` and apply it only if the SDK exposes it.
+  - **Amends D2:** the SDK drives the turns. The tool-call cap is a counter inside the
+    tool function: past the cap it returns an error telling the agent to finish, and the
+    run is marked `partial`. `max_turns` is a backstop. Timeouts use `asyncio.wait_for`
+    around each call.
+  - **Isolation**, per specialist:
+    - allow only that agent's own tool, with every built-in Claude Code tool disallowed
+    - load no settings, `CLAUDE.md` or memory (`setting_sources` empty)
+    - run from an empty temporary working directory
+    - use our own `system_prompt`, replacing the Claude Code default
+  - **Tools.** Each tool is an in-process MCP tool wrapping the same `tools.py` function.
+    The trace records the plain tool name (`search_logs`), not the MCP-prefixed one, so the
+    grader's tool check passes.
+  - **Structured output.** Use the SDK's JSON-schema output option if the installed version
+    has one. Otherwise parse the final message as JSON, validate with pydantic, and retry
+    once (as D2).
+  - **Isolation test.** A test asks each specialist to read a file under `data/` directly,
+    list the directory and run a shell command, and asserts that no call other than its own
+    tool is made and no file content comes back.
+  - **Verify first.** Check option names (`allowed_tools`, `disallowed_tools`,
+    `setting_sources`, `system_prompt`, `max_turns`, structured output) against the current
+    docs at code.claude.com/docs/en/agent-sdk before building on them.
+- **Why:** No Console API access is available. The Agent SDK uses the Claude Code login as
+  intended, unlike putting a subscription token in `.env`. Confining it to
+  `run_specialist` keeps the parallel fan-out and join in our own code, which is the part
+  of the exercise that matters.
+- **Costs accepted:**
+  - We don't own the loop.
+  - The trace's `input` payload records only what we send, not what the harness adds.
+  - Each call starts a Claude Code process.
+  - Usage counts against the Claude subscription, shared with normal Claude Code use, so
+    stability sweeps may hit limits.
+  - Anthropic's docs ask products for other people to use API keys. This is a local
+    learning exercise; re-check the terms if that changes.
+- **Consider later:** switching to the raw `anthropic` SDK (D1 and D2 as originally
+  written) once Console access exists. The debrief can then compare the two.

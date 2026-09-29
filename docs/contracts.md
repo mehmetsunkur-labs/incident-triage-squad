@@ -398,8 +398,8 @@ reads, so `grade.py run ... --trace trace.jsonl` works unchanged. One JSON objec
 | `ts` | number | Seconds since the run started (`time.monotonic()` offset). Not an ISO string: the grader does arithmetic on it. |
 | `agent` | enum | `log_analyst`, `change_historian`, `runbook_lookup`, `comms_drafter`, `synthesis` |
 | `type` | enum | `start`, `end`, `tool_call`, `input`, and any of our own (e.g. `model_call`, `error`) |
-| `tool` | string | On `tool_call` only. Must be the agent's own tool. |
-| `payload` | string | On `input` only: the exact text the agent received, system prompt plus user message. |
+| `tool` | string | On `tool_call` only. Must be the agent's own tool, by its plain name (`search_logs`), not the MCP-prefixed name the Agent SDK uses (D11). |
+| `payload` | string | On `input` only: the system prompt plus user message we send. Under the Agent SDK (D11) the harness may add more, which we cannot log. |
 
 The grader's checks, and what they need from us:
 

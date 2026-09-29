@@ -1,7 +1,7 @@
 # Implementation plan
 
 Scope: the core system (self-checks 1 to 9) plus the brief's iteration prompts. Stretch goals
-are out of scope. The design is fixed by [decisions.md](decisions.md) (D1 to D10) and
+are out of scope. The design is fixed by [decisions.md](decisions.md) (D1 to D11) and
 [contracts.md](contracts.md); this plan orders the work and says how to know each step is
 done.
 
@@ -16,7 +16,7 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 
 ```
 pyproject.toml            uv project, [project.scripts] triage = "triage.cli:app"
-.env                      TRIAGE_DATA_DIR, ANTHROPIC_API_KEY (git-ignored)
+.env                      TRIAGE_DATA_DIR (git-ignored; no model credentials, D11)
 prompts/
   log_analyst.md
   change_historian.md
@@ -29,7 +29,7 @@ src/triage/
   tools.py                search_logs, search_changes, search_runbook
   schemas.py              pydantic models for every contract
   trace.py                trace.jsonl writer (contracts §9)
-  agent.py                run_specialist loop (D2)
+  agent.py                run_specialist via the Claude Agent SDK (D2, D11)
   specialists.py          the three specialist specs
   join.py                 correlation and confidence rules (D5)
   guardrails.py           evidence, archive and remediation checks (D6)
@@ -47,8 +47,10 @@ Grader commands below assume the grader sits next to this repo:
 
 ## Step 0. Project setup
 
-- `uv init`, `src/` layout, and dependencies `anthropic`, `pydantic`, `typer`,
+- `uv init`, `src/` layout, and dependencies `claude-agent-sdk`, `pydantic`, `typer`,
   `python-dotenv`; `pytest` as a dev dependency.
+- Remove the OAuth tokens from `.env`. The Agent SDK uses the Claude Code login, not an
+  environment variable (D11).
 - `config.py` reads `TRIAGE_DATA_DIR` and fails clearly if `logs/` is missing.
 - `triage --help` runs.
 
@@ -103,29 +105,47 @@ Write down what you would have concluded anyway, and note that it was influenced
 **Done when:** a unit test writes a start, input, tool_call and end event and
 reads back the expected lines.
 
-## Step 5. Credentials
+## Step 5. Model access and SDK spike
 
-Set `ANTHROPIC_API_KEY` in `.env`, or install the `ant` CLI and run `ant auth login`.
+- Confirm Claude Code is installed and logged in (`claude --version`, then a trivial
+  `claude -p "hi"`).
+- Read the current Agent SDK docs and check the option names D11 relies on:
+  `allowed_tools`, `disallowed_tools`, `setting_sources`, `system_prompt`, `max_turns`,
+  in-process MCP tools, and any JSON-schema output option. Note in D11 anything that
+  differs.
+- A throwaway script: one query with one in-process MCP tool (a stub), only that tool
+  allowed, our own system prompt, no settings loaded, run from an empty temporary
+  directory. It prints every tool call the model makes.
 
-**Done when:** a one-line script with a bare `anthropic.Anthropic()` client gets a
-reply.
+**Done when:** the spike gets a reply, the stub tool is called under its expected name,
+and no built-in tool appears when the prompt invites one ("read ./README.md").
 
 ## Step 6. Specialist loop and log analyst
 
-- `agent.py`: `run_specialist(spec, context)` per D2:
-  - `AsyncAnthropic`, `claude-opus-5-5`, explicit `effort`.
-  - One tool, `strict: true`, `tool_choice: auto`.
-  - A manual loop up to `max_tool_calls`, then a final structured-output turn validated by
-    pydantic, with one retry.
+- `agent.py`: `run_specialist(spec, context)` per D2 as amended by D11:
+  - A Claude Agent SDK query with the specialist's one tool as an in-process MCP tool,
+    every other tool disallowed, no settings loaded, an empty temporary working directory
+    and the prompt file as `system_prompt`.
+  - The tool-call cap is a counter in the tool wrapper; past the cap it returns an error
+    telling the agent to finish. `max_turns` is a backstop, and `asyncio.wait_for` enforces
+    the timeout.
+  - Structured output through the SDK if the spike found support. Otherwise parse the final
+    message as JSON and validate with pydantic, with one retry.
+  - The tool wrapper writes `tool_call` trace events with the plain tool name.
   - Returns a `SpecialistRun` (contracts §4) and never raises; `status` reflects what
     happened.
+- Isolation test (D11): prompts inviting a file read, a directory listing and a shell
+  command produce no call other than the agent's own tool.
 - `prompts/log_analyst.md`: role, the incident, the hypotheses note, the evidence rule,
   when to stop. No change ids, ISO timestamps or `file.log:n` examples (D8).
 - A temporary debug command runs the analyst alone on INC-2043.
 
-**Done when:** on INC-2043 the analyst returns a valid `LogAnalystResult` whose evidence
-all exists in the data, `first_failure_at` matches your benchmark, and the trace
-shows its tool calls.
+**Done when:**
+- On INC-2043 the analyst returns a valid `LogAnalystResult` whose evidence all exists in
+  the data.
+- `first_failure_at` matches your benchmark.
+- The trace shows its tool calls.
+- The isolation test passes.
 
 ## Step 7. Change historian
 
@@ -206,15 +226,17 @@ anything.
 | Five identical runs | `triage run INC-2043` five times, then `grade.py run INC-2043 out/runs/INC-2043-*/result.json` | Pass rate per check, and which checks are unstable |
 
 **Follow-up question.** This is the only iteration prompt that changes the design. Before
-building it, add D11 to `decisions.md` covering:
+building it, add D12 to `decisions.md` covering:
 
 - which specialist gets the follow-up, and what triggers it
 - what extra context it may see, which must still pass the grader's context-leak checks
 - the tool-call budget for the second round
 - how its answer is merged into the join
 
-Sampling parameters (temperature) are rejected by `claude-opus-5-5`, so stability comes
-from prompts, `effort` and schemas alone.
+There is no temperature setting to lean on: `claude-opus-5-5` rejects sampling parameters,
+and the Agent SDK doesn't expose them. Stability comes from prompts and schemas alone.
+Stability sweeps run on the Claude subscription (D11), so spread them out if you hit
+usage limits.
 
 **Done when:** every row has an entry in the iteration log.
 
