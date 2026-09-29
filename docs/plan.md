@@ -14,7 +14,7 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 flags from step 11, the `run`, `eval-tools` and `eval-runbook` commands, `result.md`
 rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote steps
 6b (the specialist loop and the log analyst prompt), 7 (the change historian), 8 (the
-runbook lookup) and 9 (the orchestrator), each reviewed by you. What's left is yours:
+runbook lookup) and 9 (the orchestrator) for your review. What's left is yours:
 step 10's prompt iteration across the three incidents, running the variants and iteration
 prompts (steps 11 and 12), and the write-up (step 13), which should say which parts Claude
 wrote.
