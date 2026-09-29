@@ -132,6 +132,9 @@ Stack: Python, uv project, run locally as a CLI.
     `SpecialistRun.evidence_seen` (contracts §4): each reference the tool actually
     returned, collected by the tool wrapper. With `--empty-tool`, that set is empty for the
     affected corpus, so any citation from it is removed without special cases.
+  - "Verbatim" means a substring of the entry's text once runs of whitespace are collapsed
+    to single spaces, in both. Entries break lines mid-sentence, and the lookup is told to
+    join them (step 8).
   - When a check fails, log it to the trace and move the claim to `open_questions`. Do not
     silently fix it.
   - `matched: null` plus RB-000 actions is decided by the prompt and checked in code.

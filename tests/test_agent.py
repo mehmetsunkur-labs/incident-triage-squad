@@ -253,3 +253,72 @@ def test_analyst_and_historian_get_identical_user_messages():
     from triage.specialists import CHANGE_HISTORIAN
     ctx = specialist_input("INC-2043", "Checkout is failing.")
     assert LOG_ANALYST.user_message(ctx) == CHANGE_HISTORIAN.user_message(ctx)
+
+
+# ---- step 8: the runbook lookup, the third spec on the same loop
+
+RUNBOOK_GOOD = {
+    "matched": {"id": "RB-004", "title": "t", "source": "database.md"}, "why": "w",
+    "remediation": ["step"], "considered": [
+        {"id": "RB-004", "source": "database.md", "archived": False, "verdict": "match", "reason": "r"}],
+    "fallback": None,
+}
+
+
+def test_runbook_message_is_symptom_only():
+    import re
+    from triage.schemas import KeyValue, RunbookInput
+    from triage.specialists import runbook_user_message
+    msg = runbook_user_message(RunbookInput(symptom="Requests time out waiting for a connection.",
+                                            service="orders-api", observed=[KeyValue(key="status", value="500")]))
+    assert msg == ("Symptom: Requests time out waiting for a connection.\nService: orders-api\n"
+                   "Observed: status=500")
+    assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z|\.log:\d+|CHG-\d{4}", msg)
+
+
+def test_lookup_runbook_runs_the_runbook_spec(settings, trace, monkeypatch):
+    from triage import agent, orchestrator
+    from triage.schemas import RunbookInput, RunbookResult
+    client = FakeClient([(["connection pool"], result(RUNBOOK_GOOD))])
+    real = agent.run_specialist
+
+    async def with_fake(*a, **kw):
+        return await real(*a, client_factory=client, **kw)
+
+    monkeypatch.setattr(orchestrator, "run_specialist", with_fake)
+    inp = RunbookInput(symptom="Requests time out waiting for a connection.", service=None, observed=[])
+    r = asyncio.run(orchestrator.lookup_runbook(inp, settings, NO_FAULTS, trace))
+    assert r.agent == "runbook_lookup" and r.status == "ok" and isinstance(r.result, RunbookResult)
+    assert client.options.allowed_tools == ["mcp__triage__search_runbook"]
+    assert {"RB-004", "LEG-014"} <= set(r.evidence_seen)
+    payload = next(e for e in events(trace) if e["type"] == "input")["payload"]
+    assert payload.endswith("Symptom: Requests time out waiting for a connection.")
+
+
+def test_eval_runbook_writes_matches_nulls_and_errors(tmp_path, monkeypatch):
+    from datetime import datetime, timezone
+    from typer.testing import CliRunner
+    from triage import orchestrator
+    from triage.cli import app
+    from triage.schemas import RunbookResult, SpecialistRun
+    variants = tmp_path / "variants.json"
+    variants.write_text(json.dumps({"runbook_lookup_cases": {"cases": [
+        {"id": "A", "symptom": "match me"}, {"id": "B", "symptom": "nothing fits"},
+        {"id": "C", "symptom": "fail"}]}}))
+    no_match = {**RUNBOOK_GOOD, "matched": None, "remediation": [],
+                "fallback": {"id": "RB-000", "source": "platform-operations.md", "steps": ["s"]}}
+    now = datetime.now(timezone.utc)
+
+    async def fake(inp, settings, faults, trace):
+        body = {"match me": RUNBOOK_GOOD, "nothing fits": no_match}.get(inp.symptom)
+        return SpecialistRun[RunbookResult](
+            agent="runbook_lookup", status="ok" if body else "failed", error=None if body else "boom",
+            tool_calls=0, queries=[], evidence_seen=[], started_at=now, finished_at=now,
+            result=RunbookResult.model_validate(body) if body else None)
+
+    monkeypatch.setenv("TRIAGE_OUT_DIR", str(tmp_path / "out"))
+    monkeypatch.setattr(orchestrator, "lookup_runbook", fake)
+    out = tmp_path / "runbook.json"
+    r = CliRunner().invoke(app, ["eval-runbook", str(variants), "-o", str(out)])
+    assert r.exit_code == 0, r.output
+    assert json.loads(out.read_text()) == {"A": "RB-004", "B": None, "C": "ERROR: failed boom"}
