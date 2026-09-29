@@ -30,6 +30,18 @@ def test_logs_checkout_deploy(data_dir):
     assert "platform-events.log" in files
 
 
+def test_every_term_must_match(data_dir):
+    """AND semantics across all three tools: a multi-term query never matches more than its
+    rarest term alone, and every hit contains every term."""
+    both = search_logs(data_dir, "checkout deploy")
+    assert both["total_matches"] < min(search_logs(data_dir, t)["total_matches"] for t in ("checkout", "deploy"))
+    assert all("checkout" in r["text"].lower() and "deploy" in r["text"].lower() for r in both["results"])
+    for tool, terms in ((search_changes, ("checkout", "rollback")), (search_runbook, ("connection", "pool"))):
+        n_both = tool(data_dir, " ".join(terms), max_results=50)["total_matches"]
+        assert n_both <= min(tool(data_dir, t, max_results=50)["total_matches"] for t in terms)
+        assert n_both < max(tool(data_dir, t, max_results=50)["total_matches"] for t in terms)
+
+
 def test_logs_line_numbers_are_one_based(data_dir):
     hit = search_logs(data_dir, "pool")["results"][0]
     lines = (data_dir / "logs" / hit["file"]).read_text().splitlines()
