@@ -1,0 +1,31 @@
+[project]
+name = "triage"
+version = "0.1.0"
+description = "Incident triage multi-agent system (AINE exercise)"
+readme = "README.md"
+authors = [
+    { name = "Mehmet Sunkur", email = "mehmetsunkur@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "claude-agent-sdk>=0.2.161",
+    "pydantic>=2.13.5",
+    "python-dotenv>=1.2.3",
+    "typer>=0.27.2",
+]
+
+[project.scripts]
+triage = "triage.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.9.4,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["slow: needs the model (Claude Code login); deselect with -m 'not slow'"]
