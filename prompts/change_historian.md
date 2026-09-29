@@ -58,7 +58,10 @@ limit yourself to the services it mentions.
     `documentation`, or `other`.
   - `keys_changed`: each key with its old and new value, exactly as the record states them.
     Empty if the record names no keys.
-  - `reverted_by`: the id of the record that rolled this one back, if there is one.
+  - `reverted_by`: the id of a later record that states it reverted this change, either by
+    naming it or by naming the specific key, value or flag it restored. A rollback of a
+    whole release does not count for a change it doesn't mention; if a change was disabled
+    some other way, leave `reverted_by` null and say so in `relevance`.
   - `relevance`: why you kept it, in one sentence.
 - `hypotheses_checked`: one entry per theory. Give `supported` or `ruled_out` only when the
   change log shows it directly. The absence of a record doesn't rule out an event outside
