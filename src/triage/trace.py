@@ -96,6 +96,8 @@ def timing_summary(path: Path) -> str:
             s[1], s[2] = e["ts"], e.get("status")
     lines = []
     for agent, (start, end, status) in spans.items():
+        if start is None and end is None:
+            continue  # events without a span, e.g. the orchestrator's join and guardrail records
         took = f"{end - start:6.1f}s" if start is not None and end is not None else "   open"
         lines.append(f"  {agent:17} {took}  {status or ''}")
     la, ch = spans.get("log_analyst"), spans.get("change_historian")

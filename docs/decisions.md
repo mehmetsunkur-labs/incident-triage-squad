@@ -116,6 +116,24 @@ Stack: Python, uv project, run locally as a CLI.
     - `low`: only one side found anything, or more than one change matches.
   - **One synthesis model call** (no tools) writes `summary`, `correlation` and
     `ruled_out` from the matched pairs and the specialists' findings.
+- **Step 9 implementation (`join.py`), refining the wording above:**
+  - "Affected services" are the services on the analyst's `error` and `warning` findings,
+    plus any `service=` or `upstream=` values on them.
+  - **Strong** means a changed key's *new value* appears in a finding's attributes, under a
+    key sharing the change key's last segment and one other segment. For example,
+    `db.pool.max` → `4` matches a finding with `max=4` or `pool_max=4` on that service.
+  - A key merely *named* in a log line (such as a config-apply line listing the keys) is
+    **weak**. That ranks a changed value above a change that was only listed.
+  - Confidence:
+    - no result from either branch → `low`
+    - no correlation → `low`
+    - more than one strong change → `low`
+    - one strong change and a theory ruled out by either specialist → `high`
+    - one strong change and nothing ruled out → `medium`
+    - one weak change → `medium`
+    - several weak changes → `low`
+
+    Weaker correlations alongside a strong one are named in the reason but don't lower it.
 - **Why:** Confidence rules can be tested and must drop when the change log is removed.
   The synthesis call only writes prose over facts code already joined, so "the orchestrator
   has no tools" still holds.
@@ -128,9 +146,11 @@ Stack: Python, uv project, run locally as a CLI.
   - Enforce in code: a `LEG-*` entry is never `runbook.matched`; every evidence id appears
     in a tool result from this run; `remediation` steps appear verbatim in the matched
     entry.
-  - "Appears in a tool result from this run" is checked against the union of every
-    `SpecialistRun.evidence_seen` (contracts §4): each reference the tool actually
-    returned, collected by the tool wrapper. With `--empty-tool`, that set is empty for the
+  - "Appears in a tool result from this run" is checked against the union of
+    `SpecialistRun.evidence_seen` (contracts §4) over the runs that returned a result: each
+    reference the tool actually returned, collected by the tool wrapper. A failed or
+    timed-out run doesn't count, even if it searched before stopping, because the
+    orchestrator never received its findings. With `--empty-tool`, that set is empty for the
     affected corpus, so any citation from it is removed without special cases.
   - "Verbatim" means a substring of the entry's text once runs of whitespace are collapsed
     to single spaces, in both. Entries break lines mid-sentence, and the lookup is told to

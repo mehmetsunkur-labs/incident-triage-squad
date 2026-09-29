@@ -75,11 +75,17 @@ def test_cli_rejects_unknown_incident():
     assert r.exit_code == 2 and "known:" in r.output
 
 
-def test_cli_run_reaches_orchestrator_stub(tmp_path, monkeypatch):
-    """Until step 9 exists, `run` gets as far as the orchestrator and writes the run folder
-    and fault record."""
+def test_cli_run_writes_run_folder_and_fault_record(tmp_path, monkeypatch):
+    """`run` creates the run folder, trace and fault record before the orchestrator runs,
+    and keeps them if it fails. The orchestrator is faked: no model."""
+    from triage import orchestrator
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("orchestrator failed")
+
     monkeypatch.setenv("TRIAGE_OUT_DIR", str(tmp_path))
+    monkeypatch.setattr(orchestrator, "run_incident", boom)
     r = runner.invoke(app, ["run", "INC-2043", "--empty-tool", "search_changes"])
-    assert isinstance(r.exception, NotImplementedError)
+    assert isinstance(r.exception, RuntimeError)
     [run_dir] = (tmp_path / "runs").iterdir()
     assert (run_dir / "faults.json").exists() and (run_dir / "trace.jsonl").exists()

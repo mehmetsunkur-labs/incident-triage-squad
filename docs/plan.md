@@ -13,12 +13,11 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 **Who builds what.** Claude built the plumbing: steps 0, 2, 3 and 4, the fault-injection
 flags from step 11, the `run`, `eval-tools` and `eval-runbook` commands, `result.md`
 rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote steps
-6b (the specialist loop and the log analyst prompt), 7 (the change historian) and 8 (the
-runbook lookup) for you to review. You write the rest
-of what the exercise teaches: join, guardrails, synthesis and assembly (steps 9 and
-10), then run the variants and iteration prompts (steps 11 and
-12). The write-up should say which parts Claude wrote. Your entry points are the two stubs
-in `src/triage/orchestrator.py`.
+6b (the specialist loop and the log analyst prompt), 7 (the change historian), 8 (the
+runbook lookup) and 9 (the orchestrator), each reviewed by you. What's left is yours:
+step 10's prompt iteration across the three incidents, running the variants and iteration
+prompts (steps 11 and 12), and the write-up (step 13), which should say which parts Claude
+wrote.
 
 | Step | Status |
 |---|---|
@@ -33,7 +32,8 @@ in `src/triage/orchestrator.py`.
 | 6b Loop and log analyst | written by Claude, awaiting your review |
 | 7 Change historian | written by Claude, awaiting your review |
 | 8 Runbook lookup | written by Claude, awaiting your review: `grade.py runbook` 7/7 |
-| 9, 10 | yours |
+| 9 Orchestrator | written by Claude, awaiting your review: INC-2043 passes every hard check |
+| 10 | yours |
 | 11 Faults and variants | flags done; running the variants is yours |
 | 12, 13 | yours |
 
@@ -277,6 +277,19 @@ In order:
 
 **Done when:** `python3 $G run INC-2043 <result.json> --trace <trace.jsonl>` passes its
 contract, citation and trace checks. The golden checks may still fail at this point.
+
+Written by Claude at your request, for you to review. Built:
+- `src/triage/join.py`: correlation and confidence rules (D5)
+- `src/triage/guardrails.py` (D6)
+- `prompts/synthesis.md` and the `SYNTHESIS` zero-tool spec
+- `orchestrator.run_incident`: fan-out, join, runbook input, synthesis, guardrails and
+  assembly (§8), under the 300 s backstop
+- `tests/test_orchestrator.py`: 22 fast tests, including every D7 branch through a fake
+  `run_specialist`
+
+The first real `triage run INC-2043` passed **every hard grader check**, golden ones
+included, with one soft warning (CHG-1043 not ruled out, which matches the benchmark).
+An accidental run of the V-2043-no-changes variant also passed.
 
 ## Step 10. Get the three incidents passing
 
