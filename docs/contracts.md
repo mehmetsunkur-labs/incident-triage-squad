@@ -48,8 +48,8 @@ Shared enums:
 ## 1. Specialist input
 
 Orchestrator to log analyst and change historian. Both get the same object, rendered into
-their prompt template (`$incident_id`, `$incident_report`, `$hypotheses_note`). They never
-receive each other's output.
+the user message by their spec's `user_message` (D2); the system prompt is the prompt file,
+unchanged. They never receive each other's output.
 
 ```json
 {

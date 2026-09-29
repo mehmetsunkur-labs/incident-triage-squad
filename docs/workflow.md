@@ -65,15 +65,18 @@ events.
 ```
 trace.span(agent) opens ──► start event
   faults.before_agent(agent, faults)        delay or InjectedFault (D10)
-  render prompt from template               span.input(full prompt)
+  system prompt = prompt file; user message = spec.user_message(context)
+                                            span.input(system prompt + user message)
   query(...) with one in-process MCP tool   tools=[], setting_sources=[], empty cwd (D11)
     │  model calls the tool ──► wrapper: cap check, faults.wrap_tool, span.tool_call(plain name),
     │                           add returned refs to evidence_seen
     │  model submits via StructuredOutput
     ▼
-  ResultMessage.structured_output ──► pydantic validate ──► one retry on failure
+    │  past the cap: tool returns is_error "limit reached, submit now" (never raises)
+  ResultMessage.structured_output ──► pydantic validate
+    │  invalid: one follow-up in the same ClaudeSDKClient session with the errors
 trace.span closes ──► end event with status
-→ SpecialistRun(status ok | partial | failed | timeout)
+→ SpecialistRun(status ok | partial (cap hit) | failed | timeout)
 ```
 
 The stage timeout (`asyncio.wait_for`, 90 s, D7) wraps the span from outside, so a timeout

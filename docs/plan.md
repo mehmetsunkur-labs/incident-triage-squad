@@ -142,16 +142,25 @@ and no built-in tool appears when the prompt invites one ("read ./README.md").
 ## Step 6. Specialist loop and log analyst
 
 - `agent.py`: `run_specialist(spec, context)` per D2 as amended by D11:
-  - A Claude Agent SDK query with the options D11 fixes:
+  - A spec per D2's step 6 design: `agent`, `prompt_file`, `tool` (or `None`),
+    `output_model`, `user_message`, optional overrides. The prompt file is the system
+    prompt as written; the context goes in the user message.
+  - A Claude Agent SDK session (`ClaudeSDKClient`) with the options D11 fixes:
     - the specialist's one tool as an in-process MCP tool, with `maxResultSizeChars` raised
     - `tools=[]`, `allowed_tools` set to that tool only, `strict_mcp_config=True`
     - `setting_sources=[]`, set explicitly
     - an empty temporary working directory, and the prompt file as `system_prompt`
-  - The tool-call cap is a counter in the tool wrapper; past the cap it returns an error
-    telling the agent to finish. `max_turns` is the cap plus 3, and `asyncio.wait_for`
-    enforces the timeout.
+  - The tool-call cap is a counter in the tool wrapper; past the cap it returns
+    `is_error: True` with "limit reached, submit now, list gaps", never raising.
+    `max_turns` is the cap plus 3, and `asyncio.wait_for` enforces the timeout from
+    outside the span.
   - Structured output through `output_format` with the pydantic model's schema, read from
-    `ResultMessage.structured_output`, then validated with pydantic, with one retry.
+    `ResultMessage.structured_output`, then validated with pydantic. On failure, one
+    follow-up in the same session with the errors, inside the same timeout and cap.
+    First check that `output_format` holds for a follow-up; if not, retry with a fresh
+    query (D11).
+  - Status: `ok`; `partial` = valid result and cap hit; `failed` = no valid result after
+    the retry, including `max_turns`; `timeout` (D2).
   - The tool wrapper writes `tool_call` trace events with the plain tool name, and adds
     every reference the tool returned to the run's `evidence_seen` (D6, contracts §4).
     Nothing is logged from the message stream, which also carries `StructuredOutput`.
@@ -170,8 +179,9 @@ and no built-in tool appears when the prompt invites one ("read ./README.md").
   - **Large results:** a tool result larger than the biggest real `search_changes` output
     reaches the model inline, not as a file preview.
   - **Evidence format:** every evidence string in the result passes the D6 validator.
-- `prompts/log_analyst.md`: role, the incident, the hypotheses note, the evidence rule,
-  when to stop. No change ids, ISO timestamps or `file.log:n` examples (D8).
+- `prompts/log_analyst.md`: role and blind spot, how the tool matches, a search method,
+  the evidence rule, when to stop. No placeholders: the incident and hypotheses note arrive
+  in the user message. No change ids, ISO timestamps or `file.log:n` examples (D8).
 - A temporary debug command runs the analyst alone on INC-2043.
 
 **Done when:**
