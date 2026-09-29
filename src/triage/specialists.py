@@ -1,11 +1,11 @@
 """Specialist specs (D2). Each agent is one SpecialistSpec plus one prompt file.
 
-Step 6b defines the log analyst; steps 7 and 8 add the change historian and the runbook
+Step 6b defined the log analyst and step 7 the change historian; step 8 adds the runbook
 lookup here, and step 9 the synthesis spec.
 """
 
 from .agent import SpecialistSpec
-from .schemas import LogAnalystResult, SpecialistInput
+from .schemas import ChangeHistorianResult, LogAnalystResult, SpecialistInput
 
 # contracts §1: the same fixed text for every incident.
 HYPOTHESES_NOTE = (
@@ -39,4 +39,19 @@ LOG_ANALYST = SpecialistSpec(
     ),
 )
 
-SPECS = {s.agent: s for s in (LOG_ANALYST,)}
+CHANGE_HISTORIAN = SpecialistSpec(
+    agent="change_historian",
+    prompt_file="change_historian.md",
+    output_model=ChangeHistorianResult,
+    user_message=specialist_user_message,  # the same input as the analyst (D4, rule 4)
+    tool="search_changes",
+    tool_description=(
+        "Search the production change log. Each result is a whole change record. The query "
+        "is split on whitespace and a record matches only if every term appears somewhere "
+        "in it as a case-insensitive substring: no regex, stemming or synonyms. Results are "
+        "newest first, at most 5. truncated=true means more records matched, so narrow the "
+        "query. Each result gives the record's id to cite, its title and its full text."
+    ),
+)
+
+SPECS = {s.agent: s for s in (LOG_ANALYST, CHANGE_HISTORIAN)}

@@ -12,10 +12,11 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 
 **Who builds what.** Claude built the plumbing: steps 0, 2, 3 and 4, the fault-injection
 flags from step 11, the `run`, `eval-tools` and `eval-runbook` commands, `result.md`
-rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote step
-6b (the specialist loop and the log analyst prompt) for you to review. You write the rest
-of what the exercise teaches: the other specialists' prompts, join, guardrails, synthesis
-and assembly (steps 7 to 10), then run the variants and iteration prompts (steps 11 and
+rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote steps
+6b (the specialist loop and the log analyst prompt) and 7 (the change historian) for you to
+review. You write the rest
+of what the exercise teaches: the runbook lookup's prompt, join, guardrails, synthesis
+and assembly (steps 8 to 10), then run the variants and iteration prompts (steps 11 and
 12). The write-up should say which parts Claude wrote. Your entry points are the two stubs
 in `src/triage/orchestrator.py`.
 
@@ -30,7 +31,8 @@ in `src/triage/orchestrator.py`.
 | 5 SDK spike | done (D11) |
 | 6a SDK spike for the loop | done (D11), by Claude |
 | 6b Loop and log analyst | written by Claude, awaiting your review |
-| 7 to 10 | yours |
+| 7 Change historian | written by Claude, awaiting your review |
+| 8 to 10 | yours |
 | 11 Faults and variants | flags done; running the variants is yours |
 | 12, 13 | yours |
 
@@ -222,6 +224,11 @@ signal the loop was less reusable than you thought.
 
 **Done when:** on INC-2043 the historian returns a valid `ChangeHistorianResult` and
 its input payload contains no ISO timestamp or log reference.
+
+Written by Claude at your request, for you to review. Built: the `CHANGE_HISTORIAN` spec in
+`src/triage/specialists.py`, `prompts/change_historian.md`, 3 fast tests and 1 slow test.
+**`agent.py` needed no change**, which is worth recording for the debrief question about
+what a fourth specialist would cost.
 
 ## Step 8. Runbook lookup
 

@@ -21,5 +21,6 @@ Model access goes through the Claude Agent SDK and your Claude Code login (D11);
 is needed. Design: [docs/decisions.md](docs/decisions.md), [docs/contracts.md](docs/contracts.md),
 [docs/plan.md](docs/plan.md).
 
-Run one specialist alone while working on it: `uv run triage debug-agent log_analyst INC-2043`.
+Run one specialist alone while working on it: `uv run triage debug-agent log_analyst INC-2043`
+(or `change_historian`).
 Tests that call the model are marked slow and skipped by default: `uv run pytest -m slow`.

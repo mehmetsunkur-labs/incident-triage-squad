@@ -138,3 +138,19 @@ def test_inc_2043_citations_come_from_tool_results(settings, tmp_path):
     assert cited and cited <= set(r.evidence_seen)
     assert x.first_failure_at is not None
     assert events[-1]["init_tools"] == EXPECTED_TOOLS
+
+
+def test_historian_inc_2043_citations_and_input(settings, tmp_path):
+    """Step 7: the historian on the real model. Structure only: its citations come from its
+    own tool results, and its input passes the grader's leak check."""
+    import re
+    from triage.specialists import CHANGE_HISTORIAN
+    report = read_incident(settings.data_dir, "INC-2043")
+    r, events = run(settings, tmp_path, CHANGE_HISTORIAN, specialist_input("INC-2043", report))
+    assert r.status in ("ok", "partial"), r.error
+    x = r.result
+    cited = {e for c in x.changes for e in c.evidence} | {e for h in x.hypotheses_checked for e in h.evidence}
+    assert cited and cited <= set(r.evidence_seen)
+    assert events[-1]["init_tools"] == ["StructuredOutput", "mcp__triage__search_changes"]
+    payload = next(e for e in events if e["type"] == "input")["payload"]
+    assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z|\.log:\d+", payload)
