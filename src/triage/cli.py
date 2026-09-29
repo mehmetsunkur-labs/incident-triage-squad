@@ -95,6 +95,47 @@ def run(
     typer.echo(f"wrote {run_dir / 'result.json'} and result.md")
 
 
+@app.command("debug-agent")
+def debug_agent(
+    agent: str = typer.Argument(..., help="A specialist with a spec, e.g. log_analyst"),
+    incident_id: str = typer.Argument(..., help="e.g. INC-2043"),
+    empty_tool: list[str] = EMPTY_TOOL,
+    fail_agent: list[str] = FAIL_AGENT,
+    delay_agent: list[str] = DELAY_AGENT,
+    max_tool_calls: int | None = MAX_TOOL_CALLS,
+    timeout: float | None = typer.Option(None, "--timeout", help="Override the stage timeout, seconds"),
+    data_dir: str | None = DATA_DIR,
+):
+    """Run one specialist alone on one incident (plan step 6b). Writes <agent>.json and trace.jsonl."""
+    from . import specialists
+    from .agent import run_specialist
+
+    spec = specialists.SPECS.get(agent)
+    if spec is None:
+        typer.echo(f"no spec for {agent!r}; known: {', '.join(specialists.SPECS)}", err=True)
+        raise typer.Exit(2)
+    settings = _settings(data_dir)
+    faults = _faults(empty_tool, fail_agent, delay_agent, max_tool_calls)
+    overrides = {k: v for k, v in (("max_tool_calls", faults.max_tool_calls), ("specialist_timeout_s", timeout)) if v}
+    settings = dataclasses.replace(settings, **overrides)
+    try:
+        report = read_incident(settings.data_dir, incident_id)
+    except ConfigError as e:
+        typer.echo(f"config error: {e}", err=True)
+        raise typer.Exit(2)
+
+    run_dir = new_run_dir(settings.out_dir, f"{incident_id}-{agent}")
+    trace = Trace(run_dir / "trace.jsonl")
+    run = asyncio.run(run_specialist(spec, specialists.specialist_input(incident_id, report),
+                                     settings, faults, trace))
+    (run_dir / f"{agent}.json").write_text(run.model_dump_json(indent=2) + "\n")
+    typer.echo(f"run folder: {run_dir}")
+    typer.echo(timing_summary(trace.path))
+    typer.echo(f"  status={run.status} tool_calls={run.tool_calls} evidence_seen={len(run.evidence_seen)}"
+               + (f" error={run.error[:200]}" if run.error else ""))
+    typer.echo(f"  queries: {run.queries}")
+
+
 @app.command("eval-runbook")
 def eval_runbook(
     variants_json: Path = typer.Argument(..., exists=True, help="The grader's golden/variants.json"),
