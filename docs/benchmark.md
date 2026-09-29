@@ -5,7 +5,6 @@ don't look ahead: pass 1 uses only the incident report and `search_logs`, pass 2
 report and `search_changes`. Don't edit this afterwards to match what the system says.
 
 - Date:
-- Goldens seen beforehand: yes / no
 - Pass 2 was done after pass 1, so some queries and wording were influenced by the logs.
   Those are marked "from pass 1" in the query table and in the text.
 
