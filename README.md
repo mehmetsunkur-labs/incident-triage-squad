@@ -24,3 +24,21 @@ is needed. Design: [docs/decisions.md](docs/decisions.md), [docs/contracts.md](d
 Run one specialist alone while working on it: `uv run triage debug-agent log_analyst INC-2043`
 (or `change_historian`; `runbook_lookup` takes `--symptom "..."`).
 Tests that call the model are marked slow and skipped by default: `uv run pytest -m slow`.
+
+## Running and grading with make
+
+`make help` lists everything. The grader is expected at `../agentic_exercise_grader`; override
+with `GRADER=...`.
+
+```
+make test                          # fast tests, no model
+make tools                         # tool cases, graded, no model
+make incidents                     # run and grade INC-2043, INC-2051, INC-2062; summary at the end
+make incident-INC-2062             # one incident
+make summary                       # newest result per incident
+make variants                      # every grader variant, with its fault flags
+make stability ID=INC-2043 N=5     # N runs graded together: pass rate per check
+```
+
+Each graded run keeps a `grade.txt` next to its `result.json`. Variant and stability runs go
+to `out/variants/` and `out/stability/`, so they never count as an incident's newest run.
