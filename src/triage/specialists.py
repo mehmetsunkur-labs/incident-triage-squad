@@ -1,11 +1,13 @@
 """Specialist specs (D2). Each agent is one SpecialistSpec plus one prompt file.
 
-Steps 6b, 7 and 8 defined the log analyst, the change historian and the runbook lookup;
-step 9 adds the synthesis spec.
+The log analyst (step 6b), change historian (7), runbook lookup (8) and synthesis (9).
 """
 
 from .agent import SpecialistSpec
-from .schemas import ChangeHistorianResult, LogAnalystResult, RunbookInput, RunbookResult, SpecialistInput
+from .schemas import (
+    ChangeHistorianResult, LogAnalystResult, RunbookInput, RunbookResult, SpecialistInput,
+    SynthesisInput, SynthesisResult,
+)
 
 # contracts §1: the same fixed text for every incident.
 HYPOTHESES_NOTE = (
@@ -79,6 +81,18 @@ RUNBOOK_LOOKUP = SpecialistSpec(
         "ordered by entry id, not by relevance; total_matches larger than returned means "
         "there are more."
     ),
+)
+
+def synthesis_user_message(inp: SynthesisInput) -> str:
+    return "Triage input, as JSON:\n\n" + inp.model_dump_json(indent=2)
+
+
+SYNTHESIS = SpecialistSpec(
+    agent="synthesis",
+    prompt_file="synthesis.md",
+    output_model=SynthesisResult,
+    user_message=synthesis_user_message,
+    tool=None,  # zero-tool spec (D11)
 )
 
 SPECS = {s.agent: s for s in (LOG_ANALYST, CHANGE_HISTORIAN, RUNBOOK_LOOKUP)}
