@@ -14,7 +14,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D1. Runtime and framework
 
 - **Question:** Language, raw SDK vs framework, model per agent.
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - uv project, `src/` layout; `typer` CLI, `pydantic` schemas, `python-dotenv` for
     `TRIAGE_DATA_DIR`. Entry point in `[project.scripts]`: `uv run triage INC-2043`.
@@ -30,7 +30,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D2. Reusable specialist loop
 
 - **Question:** What parameterises one generic agent loop?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - One `run_specialist(spec, context) -> Result`. `spec` is a dataclass: prompt path, one
     tool (definition + callable), output model, `max_tool_calls`, timeout.
@@ -47,7 +47,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D3. Intermediate schemas
 
 - **Question:** What does each specialist return, so the join has keys to work with?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:** Full shapes in [contracts.md](contracts.md); summary:
   - `LogFinding`: `ts` (tz-aware datetime), `service`, `kind`
     (error / warning / deploy / config / recovery / info), `observation`,
@@ -68,7 +68,7 @@ Stack: Python, uv project, run locally as a CLI.
 
 - **Question:** Does the reporter's theory reach the specialists, and who writes the runbook
   symptom description?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - Both specialists get the full incident report, plus an orchestrator note that the
     reporter's theories are unverified hypotheses to test.
@@ -81,7 +81,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D5. Orchestrator: code vs model call
 
 - **Question:** Which parts of join-and-decide are code, and which are a model call?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:** Hybrid.
   - **Correlation in code:** a change pairs with a log finding when it touches the same
     service and took effect 0 to 15 minutes before the first error. A config key from the
@@ -100,7 +100,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D6. Guardrails: code vs prompt
 
 - **Question:** Which traps are enforced in code after the fact?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - Enforce in code: a `LEG-*` entry is never `runbook.matched`; every evidence id appears
     in a tool result from this run; `remediation` steps appear verbatim in the matched
@@ -114,7 +114,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D7. Failure and timeout behaviour
 
 - **Question:** What happens when a parallel branch throws, times out or returns nothing?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - Degrade, never crash: keep whatever finished, cap confidence at `low`, and add an open
     question naming the missing branch.
@@ -134,7 +134,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D8. Observability
 
 - **Question:** What does each run record?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - `out/runs/<incident>-<timestamp>/` containing `trace.jsonl`, `result.json`,
     `result.md`.
@@ -153,7 +153,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D9. Smaller choices
 
 - **Question:** Prompt layout/templating, CLI entry point, shared search core, tests.
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - Prompts in `prompts/<agent>.md` with `string.Template` placeholders (`$incident`); no
     Jinja.
@@ -167,7 +167,7 @@ Stack: Python, uv project, run locally as a CLI.
 ## D10. Evaluation harness
 
 - **Question:** How does the system plug into `agentic_exercise_grader`?
-- **Status:** proposed
+- **Status:** decided
 - **Decision:**
   - **Fault injection** via CLI flags on the normal run, applied inside the tool or agent
     so the system really experiences the fault:
