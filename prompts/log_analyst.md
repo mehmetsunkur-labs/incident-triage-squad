@@ -43,13 +43,21 @@ hypotheses to test, not facts.
 ## What to return
 
 - `findings`: one event per finding, in time order. `ts` is the timestamp of the cited line.
-  `attributes` holds key/value pairs copied from the line (for example a size, a count or a
-  version) exactly as logged. `observation` says what happened in plain words.
+  `kind` follows the line: `error` for an `ERROR` line and `warning` for a `WARN` line;
+  otherwise `deploy`, `config` or `recovery` when the line records one of those events, and
+  `info` for anything else. `attributes` holds key/value pairs copied from the line (for
+  example a size, a count or a version) exactly as logged. `observation` says what happened
+  in plain words.
 - `first_failure_at`: the timestamp of the earliest log line showing a user-facing request
   failing, or null if you found none.
 - `failure_mode`: one line on how the system is failing, the symptom not the cause.
 - `hypotheses_checked`: one entry per theory, with a verdict of `supported`, `ruled_out` or
-  `inconclusive`, and the evidence that decides it.
+  `inconclusive`, and the evidence that decides it. Give `supported` or `ruled_out` only
+  when the logs show it directly. The logs can show that a value changed or that an event
+  happened at a given time; they cannot show what a deploy or configuration change
+  contained, or that it caused what followed. A theory that depends on that is
+  `inconclusive`: record what you observed in `findings` and what you couldn't establish
+  in `gaps`.
 - `gaps`: what you looked for and could not establish, and events the logs show without
   explaining.
 
