@@ -48,10 +48,12 @@ Stack: Python, uv project, run locally as a CLI.
 
 - **Question:** What does each specialist return, so the join has keys to work with?
 - **Status:** proposed
-- **Decision:**
+- **Decision:** Full shapes in [contracts.md](contracts.md); summary:
   - `LogFinding`: `ts` (tz-aware datetime), `service`, `kind`
-    (error / warning / deploy / config / recovery), `observation`, `attributes: dict`
-    (e.g. `pool_max=4`), `evidence: list[str]` as `file:line`.
+    (error / warning / deploy / config / recovery / info), `observation`,
+    `attributes: list[{key, value}]`, `evidence: list[str]` as `file:line`. A list of
+    pairs rather than a dict, because structured outputs require
+    `additionalProperties: false` on every object.
   - `ChangeFinding`: `change_id`, `effective_at`, `services`, `kind`,
     `keys_changed: list[{key, old, new}]`, `reverted_by: str | None`, `evidence`.
   - Both results also carry `hypotheses_checked: list[{theory, verdict, evidence}]` and
