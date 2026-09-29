@@ -322,3 +322,19 @@ def test_eval_runbook_writes_matches_nulls_and_errors(tmp_path, monkeypatch):
     r = CliRunner().invoke(app, ["eval-runbook", str(variants), "-o", str(out)])
     assert r.exit_code == 0, r.output
     assert json.loads(out.read_text()) == {"A": "RB-004", "B": None, "C": "ERROR: failed boom"}
+
+
+def test_rate_limit_events_are_traced(settings, trace):
+    from claude_agent_sdk import RateLimitEvent, RateLimitInfo
+
+    class Throttled(FakeClient):
+        async def receive_response(self):
+            yield RateLimitEvent(rate_limit_info=RateLimitInfo(status="allowed_warning", utilization=0.93,
+                                                               rate_limit_type="five_hour"),
+                                 uuid="u", session_id="s")
+            async for m in super().receive_response():
+                yield m
+
+    run(settings, trace, Throttled([([], result(GOOD))]))
+    [e] = [e for e in events(trace) if e["type"] == "rate_limit"]
+    assert e["status"] == "allowed_warning" and e["utilization"] == 0.93

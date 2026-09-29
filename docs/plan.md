@@ -257,7 +257,7 @@ tuning.
 In order:
 
 1. **Fan-out.** Both specialists via `asyncio.gather(..., return_exceptions=True)`, each
-   under its own 90 s stage timeout, with the 300 s run backstop around the whole run
+   under its own stage timeout (150 s), with the run backstop (600 s) around the whole run
    (D7). Identical input, and neither sees the other's output.
 2. **Join** (`join.py`). Pair log findings with changes on service and time window, mark
    config-key matches as `strong`, compute `confidence` and `confidence_reason` by D5's
@@ -283,7 +283,7 @@ Written by Claude at your request, for you to review. Built:
 - `src/triage/guardrails.py` (D6)
 - `prompts/synthesis.md` and the `SYNTHESIS` zero-tool spec
 - `orchestrator.run_incident`: fan-out, join, runbook input, synthesis, guardrails and
-  assembly (§8), under the 300 s backstop
+  assembly (§8), under the run backstop (D7)
 - `tests/test_orchestrator.py`: 22 fast tests, including every D7 branch through a fake
   `run_specialist`
 

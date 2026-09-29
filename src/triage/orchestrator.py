@@ -169,9 +169,16 @@ def assemble(incident_id, analyst, historian, correlations, confidence, reason, 
     else:
         if rb is not None:
             why = rb.why
-            if rb.fallback:
-                steps = guard.remediation(rb.fallback.id, rb.fallback.steps, texts)
+            steps = guard.remediation(rb.fallback.id, rb.fallback.steps, texts) if rb.fallback else []
+            if steps:
                 actions += [Action(action=step, urgency="now", source=rb.fallback.id) for step in steps]
+            else:
+                # The runbooks' index: "If no current entry matches, follow RB-000." The lookup
+                # didn't return its steps, so point to it rather than invent them.
+                actions.append(Action(action="Follow RB-000, the procedure for when no current runbook "
+                                      "entry matches.", urgency="now", source="RB-000"))
+                questions.append("The runbook lookup found no match but did not return the no-match "
+                                 "entry's steps; read RB-000 directly.")
             closest_archived = [c.id for c in rb.considered if c.archived and c.verdict != "rejected"]
             if closest_archived:
                 questions.append(f"The closest runbook entries are archived ({', '.join(closest_archived)}); "

@@ -80,3 +80,71 @@ listed here because they are the same kind of change.
   valid result, and the run still passed every hard check.
 - **Kind:** architecture (configuration).
 - **Changed (D7):** synthesis has its own 180 s timeout; the run backstop is 420 s.
+
+## 7. Co-location depended on how the analyst grouped events (step 10)
+
+- **Seen:** in run 1 of the new join, INC-2062 failed `root_cause.cites[CHG-1048]`. The
+  analyst had merged two services' reschedule events into one finding, naming the second
+  service only in the observation. The join looked for placements in `service=`
+  attributes, so it missed the co-location link and fell back to the infrastructure change.
+- **Kind:** both. The join was fragile, and the prompt allowed merged events.
+- **Changed:** the join finds a known service name (failing or changed) anywhere in a
+  finding that has a `node` or `host`, including pod names and the observation. The analyst
+  prompt says not to merge events for different services. A correlation's `service` is now
+  the first failure's own service.
+
+## 8. Synthesis put a background condition in the root cause (step 10)
+
+- **Seen:** in run 2, INC-2043 failed `root_cause.not_decoy`. The statement said the pool
+  filled up "under evening-peak load", which presents a traffic peak (the archived
+  runbook's wrong theory) as part of the cause.
+- **Kind:** prompt.
+- **Changed:** the synthesis prompt says to name the change and its mechanism, and to keep
+  background conditions such as traffic levels or time of day in the summary.
+
+## 9. No RB-000 action when the lookup ran out of searches (step 10)
+
+- **Seen:** in run 2, INC-2062 failed `actions.follow[RB-000]`. The lookup correctly found no
+  match, but used all its searches and never looked up the no-match entry, so there was no
+  fallback and no RB-000 action.
+- **Kind:** both.
+- **Changed:** the runbook prompt keeps one search in reserve for the no-match entry. When
+  nothing matched and no fallback came back, code adds a single "Follow RB-000" action (the
+  runbooks' index says to), without inventing its steps, plus an open question.
+
+## 10. Timeouts: first too tight, then usage throttling (step 10)
+
+- **Seen:**
+  - Run 3: INC-2051's log analyst timed out at 90 s, although real analyst runs usually
+    take 40 to 60 s. D7 degraded exactly as designed (low confidence, no log citations,
+    runbook skipped), and so the golden checks failed.
+  - Run 4, after raising the timeout to 150 s: INC-2043's analyst and INC-2062's
+    historian both timed out. In both, the trace shows the **first model response took
+    about 136 s**; the agent then did all its searches in about 10 s. This was the fourth
+    full sweep in about an hour, so it is very likely usage throttling on the Claude
+    subscription, not slow work.
+- **Kind:** environment (the model access chosen in D11), not prompt or architecture.
+- **Changed:**
+  - specialist timeout 150 s, synthesis 180 s, run backstop 600 s (D7)
+  - the SDK's `RateLimitEvent`s are now written to the trace as `rate_limit` events, so the
+    next timeout can be told apart from throttling
+  - stopped running sweeps for the day rather than raising timeouts further to hide the
+    throttling
+
+## Step 10 status
+
+Four full sweeps on the step 10 branch, as `make incidents` summaries:
+
+| Run | Changes in effect | INC-2043 | INC-2051 | INC-2062 |
+|---|---|---|---|---|
+| 1 | new join (5, 6) | PASS | **PASS** | FAIL: entry 7 |
+| 2 | + 7 | FAIL: entry 8 | PASS | FAIL: entry 9 |
+| 3 | + 8, 9 | PASS | FAIL: timeout (entry 10) | **PASS** |
+| 4 | + 150 s timeouts | FAIL: throttled | PASS | FAIL: throttled |
+
+Every incident has passed every hard check at least once, and the join decided correctly
+in every run that got both specialists' results. There hasn't yet been a single run in
+which all three pass together; the failures after run 1 were prompt variance (each fixed
+once seen) and timeouts. What remains is **stability**, which is plan step 12: rerun
+`make incidents`, or `make stability ID=<id> N=5`, once usage limits have reset, and read
+the pass rate per check.

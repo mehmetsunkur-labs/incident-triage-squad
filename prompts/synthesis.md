@@ -11,8 +11,11 @@ correlations or the confidence.
 
 - `summary`: two to four sentences a duty manager could read aloud: what broke, since when,
   why (at the confidence given), and what is being done.
-- `root_cause_statement`: one sentence. Base it on the correlations. If there are none,
-  say the root cause is not established and what is known.
+- `root_cause_statement`: one sentence. Base it on the correlations: name the change and
+  the mechanism by which it caused the failure. Don't present background conditions, such
+  as traffic levels or the time of day, as part of the cause; mention them in the summary
+  if they matter. If there are no correlations, say the root cause is not established and
+  what is known.
 - `root_cause_evidence`: the citations that support it. When there is at least one
   correlation, include at least one log line and at least one change record, normally
   those in the top correlation.

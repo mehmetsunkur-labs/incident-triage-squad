@@ -327,3 +327,23 @@ def test_synthesis_failure_still_produces_a_cited_result(monkeypatch, tmp_path):
     assert "assembled by code" in r.summary and r.root_cause.evidence
     assert any("Synthesis failed" in q for q in r.open_questions)
     assert [x.theory for x in r.ruled_out] == ["The CDN is down"]
+
+
+def test_co_location_found_when_placements_are_merged_into_one_finding():
+    """The analyst may put two services' placements in one finding, naming one only in
+    the observation; the co-location link must not depend on that phrasing."""
+    merged = finding(-30, "info", "orders pod moved to n-7; two seconds later batch-encoder moved there too",
+                     ["platform.log:1", "platform.log:2"], service="platform", pod="orders-api-1f2", node="n-7")
+    a = {**ANALYST, "findings": ANALYST["findings"] + [merged]}
+    h = {**HISTORIAN, "changes": [change("CHG-9070", -12 * 60, services=("batch-encoder",))]}
+    [c] = join.correlate(la(a), ch(h))
+    assert c.link == "co_located" and c.service == "orders-api"
+
+
+def test_no_match_without_fallback_still_points_to_rb_000(monkeypatch, tmp_path):
+    no_fallback = {**RUNBOOK, "matched": None, "remediation": [], "fallback": None}
+    fake_specialists(monkeypatch, {"runbook_lookup": ("partial", no_fallback)})
+    r, _ = triage(tmp_path)
+    assert r.runbook.matched is None
+    assert r.actions[0].source == "RB-000" and "RB-000" in r.actions[0].action
+    assert any("did not return the no-match" in q for q in r.open_questions)

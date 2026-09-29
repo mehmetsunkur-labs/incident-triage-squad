@@ -14,8 +14,8 @@ from pathlib import Path
 from typing import Any, Callable
 
 from claude_agent_sdk import (
-    ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, SystemMessage, ToolAnnotations,
-    create_sdk_mcp_server, tool,
+    ClaudeAgentOptions, ClaudeSDKClient, RateLimitEvent, ResultMessage, SystemMessage,
+    ToolAnnotations, create_sdk_mcp_server, tool,
 )
 from pydantic import BaseModel, ValidationError
 
@@ -104,11 +104,17 @@ def _options(spec: SpecialistSpec, settings: Settings, system_prompt: str, cwd: 
 
 
 async def _receive(client, span: Span) -> ResultMessage | None:
-    """Read one response; record the tools the session reports at start-up."""
+    """Read one response; record the tools the session reports at start-up, and any
+    rate-limit status the CLI reports, so a slow or timed-out run can be told apart from
+    one throttled by usage limits (step 10)."""
     result = None
     async for msg in client.receive_response():
         if isinstance(msg, SystemMessage) and msg.subtype == "init":
             span.extra.setdefault("init_tools", msg.data.get("tools"))
+        elif isinstance(msg, RateLimitEvent):
+            info = msg.rate_limit_info
+            span.trace.emit(span.agent, "rate_limit", status=info.status, utilization=info.utilization,
+                            rate_limit_type=info.rate_limit_type, resets_at=info.resets_at)
         elif isinstance(msg, ResultMessage):
             result = msg
     return result

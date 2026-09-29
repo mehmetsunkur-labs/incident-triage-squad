@@ -62,13 +62,22 @@ def affected_services(analyst: LogAnalystResult) -> set[str]:
     return {s for f in analyst.findings if f.kind in FAILING_KINDS for s in _services_of(f)}
 
 
-def _placements(analyst: LogAnalystResult) -> dict[str, list[tuple[str, LogFinding]]]:
-    """node/host value -> [(service, finding)] for every finding that places a service there."""
+def _placements(analyst: LogAnalystResult, known: set[str]) -> dict[str, list[tuple[str, LogFinding]]]:
+    """node/host value -> [(service, finding)] for every finding that places a service there.
+
+    A finding places a service when it has a node/host attribute and names the service:
+    as its own service, a service= or upstream= value, a pod name starting with it, or in
+    its observation. Only `known` service names (failing services and changed services)
+    are looked for, so this doesn't depend on how the analyst phrased or grouped events."""
     out: dict[str, list[tuple[str, LogFinding]]] = {}
     for f in analyst.findings:
         places = [a.value.lower() for a in f.attributes if a.key.lower() in PLACEMENT_KEYS]
+        if not places:
+            continue
+        text = " ".join([f.observation] + [a.value for a in f.attributes]).lower()
+        named = {s for s in known if s in text}
         for place in places:
-            for service in _services_of(f) - {"platform"}:
+            for service in (_services_of(f) | named) - {"platform"}:
                 out.setdefault(place, []).append((service, f))
     return out
 
@@ -120,7 +129,10 @@ def correlate(analyst: LogAnalystResult | None, historian: ChangeHistorianResult
     failure = first_failure(analyst)
     if failure is None:
         return []
-    affected, placements = affected_services(analyst), _placements(analyst)
+    affected = affected_services(analyst)
+    changed = {s.lower() for c in historian.changes for s in c.services}
+    placements = _placements(analyst, affected | changed)
+    failing_service = failure.service.lower() if failure.service.lower() in affected else sorted(affected)[0]
     out = []
     for c in historian.changes:
         before = failure.ts - c.effective_at
@@ -140,7 +152,7 @@ def correlate(analyst: LogAnalystResult | None, historian: ChangeHistorianResult
         evidence_findings = [f for _, f in values] + shown + [failure]
         out.append(Correlation(
             log_evidence=sorted({e for f in evidence_findings for e in f.evidence}),
-            change_id=c.change_id, service=sorted(affected)[0] if kind != "same_service" else description.split(": ")[1],
+            change_id=c.change_id, service=description.split(": ")[1] if kind == "same_service" else failing_service,
             minutes_before_first_failure=round(before.total_seconds() / 60, 1),
             matched_keys=sorted({d for d, _ in values}) + [description, timing],
             strength="strong" if values else "weak", link=kind,

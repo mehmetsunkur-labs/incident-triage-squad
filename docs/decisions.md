@@ -177,11 +177,12 @@ Stack: Python, uv project, run locally as a CLI.
 - **Decision:**
   - Degrade, never crash: keep whatever finished, cap confidence at `low`, and add an open
     question naming the missing branch.
-  - Every stage that calls the model has its own timeout: 90 s for each fan-out specialist
-    and the runbook lookup, and 180 s for synthesis. Synthesis reads everything at `high`
-    effort, and it hit 90 s on INC-2043 in step 10. Each ends as a `timeout` status that
-    the branches below handle, so the run still produces an output.
-  - The whole run has a 420 s backstop, above 90 + 90 + 180 s plus overhead (originally
+  - Every stage that calls the model has its own timeout: 150 s for each fan-out
+    specialist and the runbook lookup, and 180 s for synthesis. Both were first 90 s; in
+    step 10 real runs hit that limit (synthesis on INC-2043, the log analyst on INC-2051)
+    while normally taking 40 to 60 s. Each ends as a `timeout` status that the branches
+    below handle, so the run still produces an output.
+  - The whole run has a 600 s backstop, above 150 + 150 + 180 s plus overhead (originally
     300 s). It fires only if
     something hangs outside a stage timeout, which is a bug, so it fails the run rather
     than degrading it.

@@ -42,7 +42,9 @@ hypotheses to test, not facts.
 
 ## What to return
 
-- `findings`: one event per finding, in time order. `ts` is the timestamp of the cited line.
+- `findings`: one event per finding, in time order: one log line's event, or several lines
+  recording the same event on the same service. Don't merge events for different services
+  into one finding, even when they happen together. `ts` is the timestamp of the cited line.
   `kind` follows the line: `error` for an `ERROR` line and `warning` for a `WARN` line;
   otherwise `deploy`, `config` or `recovery` when the line records one of those events, and
   `info` for anything else. `attributes` holds key/value pairs copied from the line (for
