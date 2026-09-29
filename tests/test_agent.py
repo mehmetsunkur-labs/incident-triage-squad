@@ -210,3 +210,46 @@ def test_references_cover_all_three_tools(settings):
     assert all(":" in r for r in references(search_logs(d, "pool")))
     assert references(search_changes(d, "db.pool.max")) == ["CHG-1044", "CHG-1042"]
     assert "RB-004" in references(search_runbook(d, "connection pool"))
+
+
+# ---- step 7: the change historian runs on the same loop, with a different spec only
+
+HISTORIAN_GOOD = {
+    "changes": [{"change_id": "CHG-1042", "title": "t", "effective_at": "2026-08-12T19:31:00Z",
+                 "services": ["checkout-service"], "kind": "config",
+                 "keys_changed": [{"key": "db.pool.max", "old": "40", "new": "4"}],
+                 "reverted_by": "CHG-1044", "relevance": "r", "evidence": ["CHG-1042"]}],
+    "hypotheses_checked": [], "gaps": [],
+}
+
+
+def test_historian_uses_its_own_tool_and_references(settings, trace):
+    from triage.schemas import ChangeHistorianResult
+    from triage.specialists import CHANGE_HISTORIAN
+    client = FakeClient([(["2026-08-12"], result(HISTORIAN_GOOD))])
+    r = run(settings, trace, client, spec=CHANGE_HISTORIAN)
+    assert r.status == "ok" and isinstance(r.result, ChangeHistorianResult)
+    assert client.options.allowed_tools == ["mcp__triage__search_changes"]
+    assert client.options.system_prompt == (settings.prompts_dir / "change_historian.md").read_text()
+    assert "CHG-1042" in r.evidence_seen and all(e.startswith("CHG-") for e in r.evidence_seen)
+    assert {e["tool"] for e in events(trace) if e["type"] == "tool_call"} == {"search_changes"}
+
+
+def test_historian_payload_passes_the_grader_leak_check(settings, trace):
+    """The grader rejects an ISO timestamp or a log reference in the historian's input."""
+    import re
+    from triage.config import read_incident
+    from triage.specialists import CHANGE_HISTORIAN
+    report = read_incident(settings.data_dir, "INC-2043")
+    s = settings
+    asyncio.run(run_specialist(CHANGE_HISTORIAN, specialist_input("INC-2043", report), s, NO_FAULTS,
+                               trace, client_factory=FakeClient([([], result(HISTORIAN_GOOD))])))
+    payload = next(e for e in events(trace) if e["type"] == "input")["payload"]
+    assert not re.search(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", payload)
+    assert not re.search(r"\.log:\d+", payload)
+
+
+def test_analyst_and_historian_get_identical_user_messages():
+    from triage.specialists import CHANGE_HISTORIAN
+    ctx = specialist_input("INC-2043", "Checkout is failing.")
+    assert LOG_ANALYST.user_message(ctx) == CHANGE_HISTORIAN.user_message(ctx)
