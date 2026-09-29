@@ -1,11 +1,20 @@
-"""The join (plan step 9, D5): correlate log findings with changes in code, and compute
-confidence by rule. No model call.
+"""The join (plan steps 9 and 10, D5): correlate log findings with changes in code, and
+compute confidence by rule. No model call.
 
-A change correlates with the logs when it touches a service the failing log lines name and
-reached production 0 to 15 minutes before the first failure. The match is **strong** when a
-key the change set shows up in the logs at the change's new value (for example a change
-setting `db.pool.max` to 4, and a finding with `max=4` on that service); it is **weak** when
-the change only lines up on time and service, or its key is merely named in a log line.
+A change is a candidate when it reached production up to 48 hours before the first failure
+and is linked to a failing service in one of three ways, from most to least specific:
+
+- same_service: the change touches a service named on a failing line (the line's service,
+  or a service= or upstream= on it)
+- co_located: the change's service appears in the logs on the same node or host as a
+  failing service, which the join can only see by combining both corpora
+- infrastructure: the change has platform-wide scope (an infrastructure change, or
+  services such as "all workloads on the affected nodes")
+
+A candidate is **strong** when a key it changed shows up in the logs at its new value, on a
+same-service or co-located link, however long before the failure it shipped. Otherwise it
+is **weak**. Timing within 15 minutes is reported but no longer required: effects of a
+change can wait for a scheduled job or a reschedule.
 """
 
 import re
@@ -16,13 +25,22 @@ from .schemas import (
     SpecialistRun,
 )
 
-WINDOW = timedelta(minutes=15)
+LOOKBACK = timedelta(hours=48)
+CLOSE = timedelta(minutes=15)
 FAILING_KINDS = ("error", "warning")
 SERVICE_KEYS = ("service", "upstream")
+PLACEMENT_KEYS = ("node", "host", "instance")
+INFRA_WORDS = {"all", "node", "nodes", "workloads", "cluster", "fleet", "platform"}
+STOPWORDS = {"at", "the", "of", "in", "on", "to", "a", "an", "and", "for", "rows"}
+LINK_RANK = {"same_service": 3, "co_located": 2, "infrastructure": 1}
 
 
 def _tokens(text: str) -> set[str]:
-    return {t for t in re.split(r"[^a-z0-9]+", text.lower()) if t}
+    return {t for t in re.split(r"[^a-z0-9]+", text.lower()) if t and t not in STOPWORDS}
+
+
+def _norm(value: str) -> str:
+    return value.strip().strip("\"'").strip().lower()
 
 
 def first_failure(analyst: LogAnalystResult) -> LogFinding | None:
@@ -35,43 +53,64 @@ def first_failure(analyst: LogAnalystResult) -> LogFinding | None:
     return errors[0] if errors else None
 
 
+def _services_of(f: LogFinding) -> set[str]:
+    return {f.service.lower()} | {a.value.lower() for a in f.attributes if a.key.lower() in SERVICE_KEYS}
+
+
 def affected_services(analyst: LogAnalystResult) -> set[str]:
     """Services named on failing lines: the line's own service and any service= or upstream=."""
-    out = set()
+    return {s for f in analyst.findings if f.kind in FAILING_KINDS for s in _services_of(f)}
+
+
+def _placements(analyst: LogAnalystResult) -> dict[str, list[tuple[str, LogFinding]]]:
+    """node/host value -> [(service, finding)] for every finding that places a service there."""
+    out: dict[str, list[tuple[str, LogFinding]]] = {}
     for f in analyst.findings:
-        if f.kind in FAILING_KINDS:
-            out.add(f.service.lower())
-            out.update(a.value.lower() for a in f.attributes if a.key.lower() in SERVICE_KEYS)
+        places = [a.value.lower() for a in f.attributes if a.key.lower() in PLACEMENT_KEYS]
+        for place in places:
+            for service in _services_of(f) - {"platform"}:
+                out.setdefault(place, []).append((service, f))
     return out
 
 
+def _link(change: ChangeFinding, affected: set[str], placements) -> tuple[str, str, list[LogFinding]] | None:
+    """(link type, description, findings that show it), most specific first."""
+    services = {s.lower() for s in change.services}
+    direct = sorted(services & affected)
+    if direct:
+        return "same_service", f"same service: {direct[0]}", []
+    for place, entries in sorted(placements.items()):
+        hosted = {s for s, _ in entries}
+        ours, theirs = services & hosted, affected & hosted
+        if ours and theirs:
+            shown = [f for s, f in entries if s in ours | theirs]
+            return ("co_located", f"shares {place} with {sorted(theirs)[0]}: {sorted(ours)[0]}", shown)
+    words = {w for s in change.services for w in _tokens(s)}
+    if change.kind == "infrastructure" or (words & INFRA_WORDS and not direct):
+        return "infrastructure", "infrastructure scope", []
+    return None
+
+
+GENERIC_VALUE_KEYS = {"value", "new", "to", "got"}
+
+
 def _value_matches(change: ChangeFinding, findings: list[LogFinding]) -> list[tuple[str, LogFinding]]:
-    """(description, finding) for each changed key whose new value appears in a finding's
-    attributes under a key sharing the change key's last segment and one other segment
-    (the other may be in the observation)."""
+    """A changed key's new value appears in a finding's attributes, under an attribute key
+    that shares a word with the changed key (`max=4` for `db.pool.max`), or under a generic
+    key such as `value=` when the same line names the field (`field=settled_at value=...`).
+    So a bare `4` elsewhere doesn't match."""
     hits = []
     for kc in change.keys_changed:
-        if kc.new is None:
+        if kc.new is None or not _norm(kc.new):
             continue
-        segments = [s for s in re.split(r"[._-]", kc.key.lower()) if s]
-        last, others = segments[-1], set(segments[:-1])
+        key_words, new = _tokens(kc.key), _norm(kc.new)
         for f in findings:
-            context = _tokens(f.observation)
+            line_words = {t for a in f.attributes for t in _tokens(a.value)} | _tokens(f.observation)
             for a in f.attributes:
-                attr = _tokens(a.key)
-                if last in attr and a.value.strip().lower() == kc.new.strip().lower() \
-                        and (not others or others & (attr | context)):
+                if _norm(a.value) != new:
+                    continue
+                if key_words & _tokens(a.key) or (a.key.lower() in GENERIC_VALUE_KEYS and key_words & line_words):
                     hits.append((f"{a.key}={a.value} ~ {kc.key}", f))
-    return hits
-
-
-def _named(change: ChangeFinding, findings: list[LogFinding]) -> list[tuple[str, LogFinding]]:
-    hits = []
-    for kc in change.keys_changed:
-        for f in findings:
-            text = " ".join([f.observation] + [a.value for a in f.attributes]).lower()
-            if kc.key.lower() in text:
-                hits.append((f"{kc.key} named in the logs", f))
     return hits
 
 
@@ -81,48 +120,60 @@ def correlate(analyst: LogAnalystResult | None, historian: ChangeHistorianResult
     failure = first_failure(analyst)
     if failure is None:
         return []
-    services = affected_services(analyst)
+    affected, placements = affected_services(analyst), _placements(analyst)
     out = []
     for c in historian.changes:
         before = failure.ts - c.effective_at
-        touched = services & {s.lower() for s in c.services}
-        if not touched or not timedelta(0) <= before <= WINDOW:
+        if not timedelta(0) <= before <= LOOKBACK:
             continue
-        near = [f for f in analyst.findings if c.effective_at - timedelta(minutes=5) <= f.ts <= failure.ts]
-        values, named = _value_matches(c, near), _named(c, near)
-        chosen = values or named
-        log_evidence = sorted({e for _, f in chosen for e in f.evidence} | set(failure.evidence))
+        link = _link(c, affected, placements)
+        if link is None:
+            continue
+        kind, description, shown = link
+        # Values count only between the change shipping and the first failure: a value seen
+        # after a rollback isn't evidence for the change.
+        on_service = [f for f in analyst.findings
+                      if c.effective_at <= f.ts <= failure.ts
+                      and _services_of(f) & ({s.lower() for s in c.services} | affected)]
+        values = _value_matches(c, on_service) if kind in ("same_service", "co_located") else []
+        timing = "within 15 minutes" if before <= CLOSE else f"{before.total_seconds() / 3600:.1f} hours before"
+        evidence_findings = [f for _, f in values] + shown + [failure]
         out.append(Correlation(
-            log_evidence=log_evidence, change_id=c.change_id, service=sorted(touched)[0],
+            log_evidence=sorted({e for f in evidence_findings for e in f.evidence}),
+            change_id=c.change_id, service=sorted(affected)[0] if kind != "same_service" else description.split(": ")[1],
             minutes_before_first_failure=round(before.total_seconds() / 60, 1),
-            matched_keys=sorted({d for d, _ in chosen}),
-            strength="strong" if values else "weak",
+            matched_keys=sorted({d for d, _ in values}) + [description, timing],
+            strength="strong" if values else "weak", link=kind,
         ))
-    return sorted(out, key=lambda c: (c.strength != "strong", c.minutes_before_first_failure))
+    return sorted(out, key=lambda c: (c.strength != "strong", -LINK_RANK[c.link], c.minutes_before_first_failure))
 
 
 def confidence(analyst: SpecialistRun, historian: SpecialistRun,
                correlations: list[Correlation]) -> tuple[Confidence, str]:
     """D5's rules, capped by D7 when a branch has no result."""
-    missing = [r.agent for r in (analyst, historian) if r.result is None]
+    missing = [r for r in (analyst, historian) if r.result is None]
     if missing:
-        return "low", f"No result from {' and '.join(missing)} ({', '.join(r.status for r in (analyst, historian) if r.result is None)}), so only one side of the evidence is available."
+        return "low", (f"No result from {' and '.join(r.agent for r in missing)} "
+                       f"({', '.join(r.status for r in missing)}), so only one side of the evidence is available.")
     if not correlations:
-        return "low", "No change lines up with the log findings on both service and time."
+        return "low", "No change is linked to the failing services within 48 hours before the first failure."
     strong = sorted({c.change_id for c in correlations if c.strength == "strong"})
-    weak = sorted({c.change_id for c in correlations if c.strength == "weak"} - set(strong))
-    others = f" {', '.join(weak)} also line{'s' if len(weak) == 1 else ''} up on time and service only." if weak else ""
+    weak = [c for c in correlations if c.strength == "weak" and c.change_id not in strong]
+    others = f" Also linked, more weakly: {', '.join(sorted({c.change_id for c in weak}))}." if weak else ""
     if len(strong) > 1:
         return "low", f"More than one change matches strongly: {', '.join(strong)}."
     if len(strong) == 1:
         top = next(c for c in correlations if c.change_id == strong[0])
+        why = f"{top.change_id} matches on {'; '.join(top.matched_keys)}"
         ruled_out = any(h.verdict == "ruled_out" for r in (analyst, historian) for h in r.result.hypotheses_checked)
-        keys = "; ".join(top.matched_keys)
         if ruled_out:
-            return "high", (f"{top.change_id} matches on service, time ({top.minutes_before_first_failure:g} min "
-                            f"before the first failure) and changed value ({keys}), and competing theories "
-                            f"were ruled out.{others}")
-        return "medium", f"{top.change_id} matches strongly ({keys}), but no competing theory was ruled out.{others}"
-    if len(weak) == 1:
-        return "medium", f"{weak[0]} lines up on service and time, but no changed value is visible in the logs."
-    return "low", f"Several changes line up on service and time only: {', '.join(weak)}."
+            return "high", f"{why}, and competing theories were ruled out.{others}"
+        return "medium", f"{why}, but no competing theory was ruled out.{others}"
+    best = max(LINK_RANK[c.link] for c in weak)
+    top = [c for c in weak if LINK_RANK[c.link] == best]
+    if len({c.change_id for c in top}) == 1:
+        rest = sorted({c.change_id for c in weak} - {top[0].change_id})
+        also = f" Less specifically linked: {', '.join(rest)}." if rest else ""
+        return "medium", (f"{top[0].change_id} is the most specifically linked change ({'; '.join(top[0].matched_keys)}), "
+                          f"but no changed value is visible in the logs.{also}")
+    return "low", f"Several changes are linked equally weakly: {', '.join(sorted({c.change_id for c in top}))}."

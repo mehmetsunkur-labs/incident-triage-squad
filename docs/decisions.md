@@ -116,24 +116,33 @@ Stack: Python, uv project, run locally as a CLI.
     - `low`: only one side found anything, or more than one change matches.
   - **One synthesis model call** (no tools) writes `summary`, `correlation` and
     `ruled_out` from the matched pairs and the specialists' findings.
-- **Step 9 implementation (`join.py`), refining the wording above:**
-  - "Affected services" are the services on the analyst's `error` and `warning` findings,
-    plus any `service=` or `upstream=` values on them.
-  - **Strong** means a changed key's *new value* appears in a finding's attributes, under a
-    key sharing the change key's last segment and one other segment. For example,
-    `db.pool.max` → `4` matches a finding with `max=4` or `pool_max=4` on that service.
-  - A key merely *named* in a log line (such as a config-apply line listing the keys) is
-    **weak**. That ranks a changed value above a change that was only listed.
-  - Confidence:
+- **Step 10 revision (`join.py`), superseding the step 9 rules and the 0 to 15 minute
+  window above.** The step 9 join failed INC-2051 and INC-2062 because both of their
+  causes break its assumptions. INC-2051's change shipped 8 hours before a scheduled job hit
+  it. INC-2062's change was to a different service that shared a node with the failing one.
+  These were architecture problems, not prompt problems (see `docs/iteration-log.md`).
+  - **Candidates:** changes that reached production up to **48 hours** before the first
+    failure, and are linked to a failing service. Failing services are the ones on `error`
+    and `warning` findings, plus any `service=` or `upstream=` on them. The three kinds of
+    link, most specific first:
+    - `same_service`: the change touches a failing service.
+    - `co_located`: the logs place the change's service on the same node or host as a
+      failing service. The join can only see this by combining both corpora.
+    - `infrastructure`: a platform-wide change (kind `infrastructure`, or services such as
+      "all workloads").
+  - **Strong:** a changed key's new value appears in the logs, on a `same_service` or
+    `co_located` link, however long before the failure. It must appear between the change
+    shipping and the first failure, under an attribute key sharing a word with the changed
+    key, or under a generic `value=` key when the same line names the field. Being within
+    15 minutes is reported, but it's no longer required.
+  - **Confidence:**
     - no result from either branch → `low`
-    - no correlation → `low`
+    - no candidate → `low`
     - more than one strong change → `low`
-    - one strong change and a theory ruled out by either specialist → `high`
+    - one strong change and a theory ruled out → `high`
     - one strong change and nothing ruled out → `medium`
-    - one weak change → `medium`
-    - several weak changes → `low`
-
-    Weaker correlations alongside a strong one are named in the reason but don't lower it.
+    - only weak candidates → `medium` if exactly one has the most specific link, `low` if
+      several tie
 - **Why:** Confidence rules can be tested and must drop when the change log is removed.
   The synthesis call only writes prose over facts code already joined, so "the orchestrator
   has no tools" still holds.
@@ -168,10 +177,12 @@ Stack: Python, uv project, run locally as a CLI.
 - **Decision:**
   - Degrade, never crash: keep whatever finished, cap confidence at `low`, and add an open
     question naming the missing branch.
-  - Every stage that calls the model has its own 90 s timeout: each fan-out specialist,
-    the runbook lookup and synthesis. Each ends as a `timeout` status that the branches
-    below handle, so the run still produces an output.
-  - The whole run has a 300 s backstop, above 3 × 90 s plus overhead. It fires only if
+  - Every stage that calls the model has its own timeout: 90 s for each fan-out specialist
+    and the runbook lookup, and 180 s for synthesis. Synthesis reads everything at `high`
+    effort, and it hit 90 s on INC-2043 in step 10. Each ends as a `timeout` status that
+    the branches below handle, so the run still produces an output.
+  - The whole run has a 420 s backstop, above 90 + 90 + 180 s plus overhead (originally
+    300 s). It fires only if
     something hangs outside a stage timeout, which is a bug, so it fails the run rather
     than degrading it.
   - API errors use the SDK's built-in retries (2).

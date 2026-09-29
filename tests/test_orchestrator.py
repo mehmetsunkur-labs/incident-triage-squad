@@ -75,17 +75,62 @@ def run_of(model, agent, result=None, status="ok", evidence=(), error=None):
 
 def test_value_match_is_strong_and_time_only_is_weak():
     cs = join.correlate(la(), ch())
-    assert [(c.change_id, c.strength) for c in cs] == [("CHG-9042", "strong"), ("CHG-9043", "weak")]
+    assert [(c.change_id, c.strength, c.link) for c in cs] == [
+        ("CHG-9042", "strong", "same_service"), ("CHG-9043", "weak", "same_service")]
     top = cs[0]
     assert top.service == "orders-api" and top.minutes_before_first_failure == 4.0
-    assert top.matched_keys == ["timeout_ms=3000 ~ upstream.timeout_ms"]
+    assert top.matched_keys == ["timeout_ms=3000 ~ upstream.timeout_ms", "same service: orders-api", "within 15 minutes"]
     assert set(top.log_evidence) == {"orders-api.log:5", "orders-api.log:9"}
 
 
-def test_outside_window_or_other_service_does_not_correlate():
-    h = {**HISTORIAN, "changes": [change("CHG-9001", 3), change("CHG-9002", -20),
+def test_outside_lookback_after_failure_or_unlinked_does_not_correlate():
+    h = {**HISTORIAN, "changes": [change("CHG-9001", 3), change("CHG-9002", -49 * 60),
                                   change("CHG-9003", -2, services=("billing",))]}
     assert join.correlate(la(), ch(h)) == []
+
+
+def test_value_match_counts_hours_before_the_failure():
+    """A change whose value shows up in the logs is strong even long before the failure,
+    e.g. a feed change that only bites when a scheduled job next runs."""
+    h = {**HISTORIAN, "changes": [change("CHG-9050", -8 * 60, "upstream.timeout_ms", "10000", "3000")]}
+    [c] = join.correlate(la(), ch(h))
+    assert c.strength == "strong" and "8.0 hours before" in c.matched_keys
+
+
+def test_value_match_uses_the_findings_words_not_just_its_keys():
+    a = {**ANALYST, "findings": [finding(2, "error", "Message failed validation", ["worker.log:4"],
+                                         service="worker", field="settled_at", value="0000-00-00")],
+         "first_failure_at": at(2)}
+    h = {**HISTORIAN, "changes": [change("CHG-9060", -600, "settled_at (unsettled rows)", "null", '"0000-00-00"',
+                                         services=("worker",))]}
+    [c] = join.correlate(la(a), ch(h))
+    assert c.strength == "strong" and c.matched_keys[0] == "value=0000-00-00 ~ settled_at (unsettled rows)"
+
+
+def placed(minutes, evidence, service, node):
+    """A platform line placing a service's pod on a node."""
+    f = finding(minutes, "info", f"{service} pod moved to {node}", evidence, service="platform", node=node)
+    f["attributes"].append({"key": "service", "value": service})
+    return f
+
+
+CO_LOCATED = {**ANALYST, "findings": ANALYST["findings"] + [
+    placed(-30, ["platform.log:1"], "orders-api", "n-7"), placed(-29, ["platform.log:2"], "batch-encoder", "n-7")]}
+
+
+def test_co_located_change_links_through_a_shared_node():
+    h = {**HISTORIAN, "changes": [change("CHG-9070", -12 * 60, services=("batch-encoder",)),
+                                  {**change("CHG-9071", -13 * 60, services=("all workloads on the affected nodes",)),
+                                   "kind": "infrastructure"}]}
+    cs = join.correlate(la(CO_LOCATED), ch(h))
+    assert [(c.change_id, c.link, c.strength) for c in cs] == [
+        ("CHG-9070", "co_located", "weak"), ("CHG-9071", "infrastructure", "weak")]
+    assert "shares n-7 with orders-api: batch-encoder" in cs[0].matched_keys
+    assert {"platform.log:1", "platform.log:2"} <= set(cs[0].log_evidence)
+    ar = run_of(LogAnalystResult, "log_analyst", la(CO_LOCATED))
+    hr = run_of(ChangeHistorianResult, "change_historian", ch(h))
+    level, reason = join.confidence(ar, hr, cs)
+    assert level == "medium" and "CHG-9070 is the most specifically linked" in reason
 
 
 def test_upstream_attribute_counts_as_affected_service():
@@ -115,7 +160,7 @@ def test_confidence_rules(case, expected):
         cs = cs[:1] + [cs[0].model_copy(update={"change_id": "CHG-9044"})]
     elif case == "one_weak":
         cs = cs[1:]
-    elif case == "two_weak":
+    elif case == "two_weak":  # equally specific weak links
         cs = cs[1:] + [cs[1].model_copy(update={"change_id": "CHG-9045"})]
     level, reason = join.confidence(ar, hr, cs)
     assert level == expected and reason

@@ -315,8 +315,9 @@ code has already joined. It decides nothing that code already decided.
       "change_id": "CHG-9042",
       "service": "orders-api",
       "minutes_before_first_failure": 2.2,
-      "matched_keys": ["timeout_ms ~ upstream.timeout_ms"],
-      "strength": "strong"
+      "matched_keys": ["timeout_ms=3000 ~ upstream.timeout_ms", "same service: orders-api", "within 15 minutes"],
+      "strength": "strong",
+      "link": "same_service"
     }
   ],
   "confidence": "high",
@@ -330,7 +331,8 @@ code has already joined. It decides nothing that code already decided.
 | `correlations[]` | `Correlation` | Produced by the join code. Empty means code found nothing to pair. |
 | `correlations[].minutes_before_first_failure` | number | Negative if the change came after the failure. |
 | `correlations[].matched_keys` | array of string | The log attribute and change key that lined up, when there is one. |
-| `correlations[].strength` | `Strength` | |
+| `correlations[].strength` | `Strength` | `strong` when a changed value is visible in the logs (D5). |
+| `correlations[].link` | enum | `same_service`, `co_located` (same node or host as a failing service), `infrastructure` (D5). |
 | `confidence`, `confidence_reason` | `Confidence`, string | Set by code rules (D5). The model does not change them. |
 
 ### Output (`SynthesisResult`)

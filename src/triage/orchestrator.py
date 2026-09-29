@@ -73,8 +73,9 @@ async def _run(incident_id, report, settings, faults, trace) -> TriageResult:
     synthesis_input = SynthesisInput(
         incident_id=incident_id, incident_report=report, analyst=analyst, historian=historian,
         correlations=correlations, confidence=confidence, confidence_reason=reason, runbook=runbook)
-    synthesis = await run_specialist(dataclasses.replace(SYNTHESIS, effort=settings.synthesis_effort),
-                                     synthesis_input, settings, faults, trace)
+    synthesis_spec = dataclasses.replace(SYNTHESIS, effort=settings.synthesis_effort,
+                                         timeout_s=settings.synthesis_timeout_s)
+    synthesis = await run_specialist(synthesis_spec, synthesis_input, settings, faults, trace)
 
     # 6-7. Guardrails (D6) and assembly (§8).
     result = assemble(incident_id, analyst, historian, correlations, confidence, reason,
