@@ -246,8 +246,10 @@ Stack: Python, uv project, run locally as a CLI.
     tool function: past the cap it returns `is_error: True` with a message like "Tool-call
     limit reached (8). Do not search again. Submit your answer now from what you have, and
     list what you could not check in `gaps`." It never raises. The run is marked
-    `partial` if a valid result then comes back. `max_turns` is a backstop set to the cap plus 3, because
-    submitting structured output and finishing take turns of their own. Timeouts use
+    `partial` if a valid result then comes back. `max_turns` is a backstop set to twice
+    the cap plus 4 (first written as the cap plus 3, raised after the 6a spike showed
+    `num_turns` isn't one per tool call). The tool takes only a `query`: `max_results` stays
+    at the contract default, so truncation stays visible to the agent. Timeouts use
     `asyncio.wait_for` around each call.
   - **Isolation**, per specialist:
     - `tools=[]`, which removes every built-in Claude Code tool so the model never sees
@@ -323,9 +325,19 @@ Stack: Python, uv project, run locally as a CLI.
       value includes the first attempt.
     - A run cost about $0.15 as reported (`total_cost_usd`), charged against the
       subscription rather than billed.
-  - **Not yet verified** (step 6b tests): the tool-call cap, cancellation by
-    `asyncio.wait_for` and cleanup of its process, auto-memory injection with
-    `setting_sources=[]`, and the `maxResultSizeChars` threshold.
+  - **Verified by the step 6b tests** (`tests/test_agent_live.py`, real model):
+    - an adversarial user message asking for a file read, a directory listing and a shell
+      command produces only `search_logs` calls, and the session's tools are only
+      `StructuredOutput` and our tool
+    - a canary in `CLAUDE.md` in the working directory and one in that directory's
+      auto-memory never appear in the output, with `setting_sources=[]`
+    - with a cap of 2, the third call is refused, the run is `partial`, and a result still
+      comes back
+    - a 3 s stage timeout ends the run as `timeout` in both the run and the trace, and no
+      Claude Code process is left running afterwards
+    - a tool result over 100,000 characters reaches the model inline with
+      `maxResultSizeChars=500000`
+    - on INC-2043 every cited evidence id is in `evidence_seen`
 - **Why:** No Console API access is available. The Agent SDK uses the Claude Code login as
   intended, unlike putting a subscription token in `.env`. Confining it to
   `run_specialist` keeps the parallel fan-out and join in our own code, which is the part

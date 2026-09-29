@@ -28,4 +28,5 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "-m 'not slow'"
 markers = ["slow: needs the model (Claude Code login); deselect with -m 'not slow'"]

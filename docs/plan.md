@@ -12,10 +12,12 @@ Runbook input carries the symptom only, never the suspected cause (contracts §5
 
 **Who builds what.** Claude built the plumbing: steps 0, 2, 3 and 4, the fault-injection
 flags from step 11, the `run`, `eval-tools` and `eval-runbook` commands, `result.md`
-rendering, and the two SDK spikes (steps 5 and 6a). You write the parts the exercise
-teaches: the agent loop, prompts, specialists, join, guardrails, synthesis and assembly
-(steps 6b to 10), then run the variants and iteration prompts (steps 11 and 12). The
-write-up should note that the SDK behaviour came from Claude's spikes. Your entry points are the two stubs in `src/triage/orchestrator.py`.
+rendering, and the two SDK spikes (steps 5 and 6a). At your request Claude also wrote step
+6b (the specialist loop and the log analyst prompt) for you to review. You write the rest
+of what the exercise teaches: the other specialists' prompts, join, guardrails, synthesis
+and assembly (steps 7 to 10), then run the variants and iteration prompts (steps 11 and
+12). The write-up should say which parts Claude wrote. Your entry points are the two stubs
+in `src/triage/orchestrator.py`.
 
 | Step | Status |
 |---|---|
@@ -27,7 +29,8 @@ write-up should note that the SDK behaviour came from Claude's spikes. Your entr
 | `result.md` rendering | done (`render.py`, D8) |
 | 5 SDK spike | done (D11) |
 | 6a SDK spike for the loop | done (D11), by Claude |
-| 6b to 10 | yours |
+| 6b Loop and log analyst | written by Claude, awaiting your review |
+| 7 to 10 | yours |
 | 11 Faults and variants | flags done; running the variants is yours |
 | 12, 13 | yours |
 
@@ -151,7 +154,16 @@ validation failure, and the shape of an error result.
 **Done:** findings recorded in D11 under "Verified in the step 6a spike". Read those
 rather than the script; the script is deliberately not a template.
 
-## Step 6b. Specialist loop and log analyst (you)
+## Step 6b. Specialist loop and log analyst
+
+Written by Claude at your request, for you to review; this departs from the original split
+(the loop and prompts were yours). The write-up should say so.
+
+Built: `src/triage/agent.py` (`SpecialistSpec`, `ToolState`, `run_specialist`),
+`src/triage/specialists.py` (the log analyst spec, `specialist_input`),
+`prompts/log_analyst.md`, `triage debug-agent <agent> <incident>`, `tests/test_agent.py`
+(12 fast tests with a fake client) and `tests/test_agent_live.py` (5 slow tests with the real
+model, `uv run pytest -m slow`).
 
 - `agent.py`: `run_specialist(spec, context)` per D2 as amended by D11:
   - A spec per D2's step 6 design: `agent`, `prompt_file`, `tool` (or `None`),
