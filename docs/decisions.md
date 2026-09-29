@@ -32,7 +32,7 @@ Stack: Python, uv project, run locally as a CLI.
 
 - **Question:** What parameterises one generic agent loop?
 - **Status:** revisited, amended by D11 (the SDK drives the loop; the `run_specialist`
-  interface, caps and partial results stand)
+  interface, caps and partial results stand) and by the step 6 design below
 - **Decision:**
   - One `run_specialist(spec, context) -> Result`. `spec` is a dataclass: prompt path, one
     tool (definition + callable), output model, `max_tool_calls`, timeout.
@@ -45,6 +45,27 @@ Stack: Python, uv project, run locally as a CLI.
   - No `submit_findings` tool: that would break "exactly one tool".
 - **Why:** The historian should be the analyst with different config; if it isn't, the
   loop is wrong. Partial results feed the confidence rules in D5.
+- **Step 6 design (supersedes the spec and status wording above):**
+  - **Spec:** a frozen dataclass with `agent` (an `AgentName`), `prompt_file` (in
+    `prompts/`), `tool` (a tool name, or `None` for synthesis), `output_model` (the pydantic
+    class), `user_message` (a function from this agent's context to text), and optional
+    `effort`, `max_tool_calls` and `timeout_s` overrides, where `None` means the setting.
+  - **Prompts:** the system prompt is the prompt file verbatim, with no placeholders. The
+    per-incident context (the report and hypotheses note, the runbook input, the synthesis
+    input) goes in the user message, built by the spec's `user_message`. Both parts are
+    logged together as the trace `input` payload. This amends D9.
+  - **Status:**
+    - `ok`: a valid result
+    - `partial`: a valid result, and the tool-call cap was hit
+    - `failed`: no valid result after the retry, including `max_turns` reached without
+      one; the reason (`terminal_reason` or the validation error) goes in `error`
+    - `timeout`: the stage timeout expired
+
+    The confidence rules treat `partial` like `ok`, and the orchestrator adds an open
+    question naming the specialist that ran out of searches.
+  - **Why:** four different inputs share one pattern; prompt files stay the same for every
+    incident, so diffs stay readable (brief rule 7), with no `$` escaping. Tying `partial` to
+    the cap alone keeps it meaning "stopped early but answered".
 
 ## D3. Intermediate schemas
 
@@ -107,6 +128,10 @@ Stack: Python, uv project, run locally as a CLI.
   - Enforce in code: a `LEG-*` entry is never `runbook.matched`; every evidence id appears
     in a tool result from this run; `remediation` steps appear verbatim in the matched
     entry.
+  - "Appears in a tool result from this run" is checked against the union of every
+    `SpecialistRun.evidence_seen` (contracts §4): each reference the tool actually
+    returned, collected by the tool wrapper. With `--empty-tool`, that set is empty for the
+    affected corpus, so any citation from it is removed without special cases.
   - When a check fails, log it to the trace and move the claim to `open_questions`. Do not
     silently fix it.
   - `matched: null` plus RB-000 actions is decided by the prompt and checked in code.
@@ -120,14 +145,21 @@ Stack: Python, uv project, run locally as a CLI.
 - **Decision:**
   - Degrade, never crash: keep whatever finished, cap confidence at `low`, and add an open
     question naming the missing branch.
-  - 90 s per specialist (D2), 120 s for the whole run. API errors use the SDK's built-in
-    retries (2).
+  - Every stage that calls the model has its own 90 s timeout: each fan-out specialist,
+    the runbook lookup and synthesis. Each ends as a `timeout` status that the branches
+    below handle, so the run still produces an output.
+  - The whole run has a 300 s backstop, above 3 × 90 s plus overhead. It fires only if
+    something hangs outside a stage timeout, which is a bug, so it fails the run rather
+    than degrading it.
+  - API errors use the SDK's built-in retries (2).
   - If the log analyst produced no result, there is no established symptom, so the runbook
     lookup is skipped: `runbook.matched` is `null`, `why` says the lookup did not run and
     why, and a single `orchestrator` action says to follow RB-000 until a symptom is
     established. No steps are invented.
 - **Why:** A partial answer with honest confidence is more useful to a duty manager than a
-  stack trace, and it's what the iteration prompts test. The runbook lookup may only see a
+  stack trace, and it's what the iteration prompts test. The stages run in sequence, so a
+  single 120 s run budget (the original value) couldn't fit a slow but successful run;
+  per-stage timeouts can. The runbook lookup may only see a
   symptom (D4); the historian's output is not one, and the raw report carries the
   reporter's theory.
 - **Consider later:** Feeding the lookup the reporter's described symptom instead, if
@@ -139,7 +171,8 @@ Stack: Python, uv project, run locally as a CLI.
 - **Status:** decided
 - **Decision:**
   - `out/runs/<incident>-<timestamp>/` containing `trace.jsonl`, `result.json`,
-    `result.md`.
+    `result.md`. `result.md` is rendered by `render.py` from the validated
+    `TriageResult`; it is formatting only, and the CLI writes it next to `result.json`.
   - `trace.jsonl` uses the grader's event format exactly (see
     [contracts.md §9](contracts.md#9-trace-events)): `ts` in seconds since run start,
     `type` of `start` / `end` / `tool_call` / `input`, plus our own extra fields (tokens,
@@ -155,10 +188,11 @@ Stack: Python, uv project, run locally as a CLI.
 ## D9. Smaller choices
 
 - **Question:** Prompt layout/templating, CLI entry point, shared search core, tests.
-- **Status:** decided
+- **Status:** revisited, amended by D2's step 6 design (no placeholders)
 - **Decision:**
-  - Prompts in `prompts/<agent>.md` with `string.Template` placeholders (`$incident`); no
-    Jinja.
+  - Prompts in `prompts/<agent>.md`, used verbatim as the system prompt. Per-incident
+    context goes in the user message (D2). Originally `string.Template` placeholders; no
+    Jinja either way.
   - One `corpus.py` with shared term matching; each tool supplies its retrieval unit
     (line / record / entry) and sort order.
   - `pytest` for the tool table in `tool-contracts.md` first; an INC-2043 golden test
@@ -209,8 +243,10 @@ Stack: Python, uv project, run locally as a CLI.
   - **Amends D1:** no `AsyncAnthropic` client. The model is set through the SDK options.
     Keep `effort` in `config.py` and apply it only if the SDK exposes it.
   - **Amends D2:** the SDK drives the turns. The tool-call cap is a counter inside the
-    tool function: past the cap it returns an error telling the agent to finish, and the
-    run is marked `partial`. `max_turns` is a backstop set to the cap plus 3, because
+    tool function: past the cap it returns `is_error: True` with a message like "Tool-call
+    limit reached (8). Do not search again. Submit your answer now from what you have, and
+    list what you could not check in `gaps`." It never raises. The run is marked
+    `partial` if a valid result then comes back. `max_turns` is a backstop set to the cap plus 3, because
     submitting structured output and finishing take turns of their own. Timeouts use
     `asyncio.wait_for` around each call.
   - **Isolation**, per specialist:
@@ -229,12 +265,22 @@ Stack: Python, uv project, run locally as a CLI.
     (`search_logs`), never taken from the message stream. The stream also carries the
     MCP-prefixed name and the harness's `StructuredOutput` call, either of which would
     fail the grader's tool check.
+  - **Zero-tool specs.** The tool is optional in a spec. With none, no MCP server is
+    created and `allowed_tools=[]`; everything else (span, timeout, structured output,
+    validation, retry, status) is the same. The synthesis call is a zero-tool spec, so it
+    goes through `run_specialist` rather than a second function.
   - **Structured output.** `output_format={"type": "json_schema", "schema": ...}` with the
     pydantic model's schema; the parsed object arrives in `ResultMessage.structured_output`.
     Validate it with pydantic anyway and retry once (as D2): the schema does not constrain
     string contents, and in the spike the model wrote `file:line — <log text>` as evidence.
     The prompt states the evidence format exactly, and the D6 validator rejects anything
     else.
+  - **Retry through `ClaudeSDKClient`.** Keep the session and send one follow-up: "Your
+    answer failed validation: `<errors>`. Resubmit it corrected, without new searches
+    unless needed." A fresh query would repeat every search and could change the findings.
+    The retry runs inside the same stage timeout and tool-call cap. Not yet verified:
+    whether `output_format` applies to a follow-up in the same session. If it doesn't,
+    fall back to a fresh `query` with the errors appended.
   - **The `StructuredOutput` tool is accepted.** The harness adds it to deliver the
     structured answer. It is effectively the `submit_findings` tool D2 rejected, but it is
     an output channel that cannot reach any corpus, so it does not break "exactly one

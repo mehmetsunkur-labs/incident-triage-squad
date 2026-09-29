@@ -48,8 +48,8 @@ Shared enums:
 ## 1. Specialist input
 
 Orchestrator to log analyst and change historian. Both get the same object, rendered into
-their prompt template (`$incident_id`, `$incident_report`, `$hypotheses_note`). They never
-receive each other's output.
+the user message by their spec's `user_message` (D2); the system prompt is the prompt file,
+unchanged. They never receive each other's output.
 
 ```json
 {
@@ -181,19 +181,21 @@ so they are not part of any structured-output schema.
   "error": null,
   "tool_calls": 5,
   "queries": ["timeout", "orders-api error", "deploy orders-api"],
+  "evidence_seen": ["CHG-9042", "orders-api.log:12", "orders-api.log:13"],
   "started_at": "2026-01-01T12:00:00.120Z",
   "finished_at": "2026-01-01T12:00:21.870Z",
-  "result": { "...": "LogAnalystResult | ChangeHistorianResult | RunbookResult, or null" }
+  "result": { "...": "LogAnalystResult | ChangeHistorianResult | RunbookResult | SynthesisResult, or null" }
 }
 ```
 
 | Field | Type | Notes |
 |---|---|---|
-| `agent` | enum | `log_analyst`, `change_historian`, `runbook_lookup` |
+| `agent` | enum | `log_analyst`, `change_historian`, `runbook_lookup`, `synthesis` |
 | `status` | `RunStatus` | `partial` = the tool-call cap was hit but a result came back. `failed` or `timeout` means `result` is `null`. |
 | `error` | string or null | Exception text for `failed` and `timeout`. |
 | `tool_calls` | integer | |
 | `queries` | array of string | Every query sent to the tool, in order. It feeds the runbook `why` when nothing matched, and the debrief. |
+| `evidence_seen` | evidence list | Every reference the tool returned during this run, sorted and without duplicates: `file:line` for log lines, `CHG-nnnn` for change records, `RB-`/`LEG-` ids for runbook entries. Collected by the tool wrapper. The D6 citation check uses the union across all runs. Empty for synthesis, which has no tool. |
 | `started_at`, `finished_at` | date-time | Wall-clock times for `result.md`. The grader's concurrency check reads the trace (§9), not these. |
 | `result` | object or null | |
 

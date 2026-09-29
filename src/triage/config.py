@@ -23,8 +23,8 @@ class Settings:
     specialist_effort: str = "medium"
     synthesis_effort: str = "high"
     max_tool_calls: int = 8
-    specialist_timeout_s: float = 90.0
-    run_timeout_s: float = 120.0
+    specialist_timeout_s: float = 90.0  # every model stage: specialists, runbook, synthesis (D7)
+    run_timeout_s: float = 300.0  # whole-run backstop; firing it is a bug, not a degraded run
 
 
 def resolve_data_dir(value: str | None = None) -> Path:
