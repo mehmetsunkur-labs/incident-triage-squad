@@ -217,6 +217,7 @@ class SpecialistRun(Strict, Generic[T]):
     error: str | None
     tool_calls: int
     queries: list[str]
+    evidence_seen: list[Evidence]  # every reference the tool returned (D6); code-side only
     started_at: AwareDatetime
     finished_at: AwareDatetime
     result: T | None

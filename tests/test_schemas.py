@@ -88,7 +88,8 @@ def test_archived_entry_never_matched_in_output():
 
 
 def test_run_status_and_result_agree():
-    kw = dict(agent="log_analyst", error=None, tool_calls=0, queries=[], started_at=NOW, finished_at=NOW)
+    kw = dict(agent="log_analyst", error=None, tool_calls=0, queries=[], evidence_seen=[],
+              started_at=NOW, finished_at=NOW)
     with pytest.raises(ValidationError):
         SpecialistRun[LogAnalystResult](status="ok", result=None, **kw)
     SpecialistRun[LogAnalystResult](status="timeout", result=None, **kw)

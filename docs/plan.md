@@ -23,6 +23,7 @@ synthesis and assembly (steps 6 to 10), then run the variants and iteration prom
 | 2 Tools | done: `grade.py tools` passes 31/31 |
 | 3 Schemas | done |
 | 4 Trace | done |
+| `result.md` rendering | done (`render.py`, D8) |
 | 5 SDK spike | done (D11) |
 | 6 to 10 | yours |
 | 11 Faults and variants | flags done; running the variants is yours |
@@ -54,7 +55,7 @@ src/triage/
   synthesis.py            the one synthesis call
   orchestrator.py         fan-out, join, runbook, synthesis, assembly
   faults.py               fault injection (D10)
-  render.py               result.md
+  render.py               result.md (built)
 tests/
 ```
 
@@ -151,8 +152,10 @@ and no built-in tool appears when the prompt invites one ("read ./README.md").
     enforces the timeout.
   - Structured output through `output_format` with the pydantic model's schema, read from
     `ResultMessage.structured_output`, then validated with pydantic, with one retry.
-  - The tool wrapper writes `tool_call` trace events with the plain tool name. Nothing is
-    logged from the message stream, which also carries `StructuredOutput`.
+  - The tool wrapper writes `tool_call` trace events with the plain tool name, and adds
+    every reference the tool returned to the run's `evidence_seen` (D6, contracts §4).
+    Nothing is logged from the message stream, which also carries `StructuredOutput`.
+  - The tool is optional in a spec, so synthesis can reuse the same function (D11).
   - Returns a `SpecialistRun` (contracts §4) and never raises; `status` reflects what
     happened.
 - Tests for D11, including the items the spike did not verify:
@@ -200,8 +203,9 @@ no-match case and the vague-symptom case that word-matches the archive.
 
 In order:
 
-1. **Fan-out.** Both specialists via `asyncio.gather(..., return_exceptions=True)` under
-   the whole-run timeout. Identical input, and neither sees the other's output.
+1. **Fan-out.** Both specialists via `asyncio.gather(..., return_exceptions=True)`, each
+   under its own 90 s stage timeout, with the 300 s run backstop around the whole run
+   (D7). Identical input, and neither sees the other's output.
 2. **Join** (`join.py`). Pair log findings with changes on service and time window, mark
    config-key matches as `strong`, compute `confidence` and `confidence_reason` by D5's
    rules, and cap at `low` when a branch is missing (D7).
@@ -209,7 +213,8 @@ In order:
    the symptom only. Skip the lookup when there is no symptom (D7).
 4. **Synthesis.** One call with the §7 input and no tools.
 5. **Guardrails** (`guardrails.py`). Remove citations missing from this run's tool
-   results, reject a `LEG-` match, and check remediation is verbatim. Record each violation
+   results (the union of every run's `evidence_seen`), reject a `LEG-` match, and check
+   remediation is verbatim. Record each violation
    in the trace and in `open_questions` (D6).
 6. **Assemble** `TriageResult` per §8, validate it, write `result.json` and `result.md`,
    and print the timing summary.

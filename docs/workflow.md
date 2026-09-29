@@ -32,13 +32,13 @@ Legend: **[built]** exists in `src/triage/`; **[yours]** is written in plan step
                                 │                    → SpecialistRun[RunbookResult] (§6)
                                 │   (skipped when there is no symptom, D7)
                                 ▼
- 5. synthesis ── SynthesisInput (§7) ──► one model call, no tools → SynthesisResult (§7)
+ 5. synthesis ── SynthesisInput (§7) ──► run_specialist(synthesis), no tool → SynthesisResult (§7)
                                 │
                                 ▼
  6. guardrails, code only (D6) ── violations go to the trace and open_questions
                                 │
                                 ▼
- 7. assemble TriageResult (§8), validate ── CLI writes result.json, prints timing summary
+ 7. assemble TriageResult (§8), validate ── CLI writes result.json and result.md, prints timing
 ```
 
 ---
@@ -52,20 +52,23 @@ Legend: **[built]** exists in `src/triage/`; **[yours]** is written in plan step
 | 2 | Fan-out | `run_specialist` ×2 [yours] | `SpecialistInput` | two `SpecialistRun`s | D1, D2, D11, §2 to §4 |
 | 3 | Join | code [yours] | both runs | `Correlation`s, `confidence`, `confidence_reason` | D5, D7, §7 |
 | 4 | Runbook lookup | `run_specialist` [yours] | `RunbookInput` built from the analyst's result | `SpecialistRun[RunbookResult]`, or skipped | D4, D7, §5, §6 |
-| 5 | Synthesis | one model call [yours] | `SynthesisInput` | `SynthesisResult` | D5, §7 |
-| 6 | Guardrails | code [yours] | everything above | cleaned results, violations | D6 |
-| 7 | Assemble | code [yours], then CLI [built] writes | everything above | `TriageResult`, `result.json` | D8, §8 |
+| 5 | Synthesis | `run_specialist`, zero-tool spec [yours] | `SynthesisInput` | `SpecialistRun[SynthesisResult]` | D5, D11, §7 |
+| 6 | Guardrails | code [yours] | everything above, including every run's `evidence_seen` | cleaned results, violations | D6, §4 |
+| 7 | Assemble | code [yours], then CLI [built] writes | everything above | `TriageResult`, `result.json`, `result.md` | D8, §8 |
 
 ## Inside `run_specialist` (stages 2 and 4)
 
-The same function for all three specialists; only the spec differs (D2, D11).
+The same function for the three specialists and synthesis; only the spec differs (D2,
+D11). Synthesis is a zero-tool spec: no MCP server, `allowed_tools=[]`, no `tool_call`
+events.
 
 ```
 trace.span(agent) opens ──► start event
   faults.before_agent(agent, faults)        delay or InjectedFault (D10)
   render prompt from template               span.input(full prompt)
   query(...) with one in-process MCP tool   tools=[], setting_sources=[], empty cwd (D11)
-    │  model calls the tool ──► wrapper: cap check, faults.wrap_tool, span.tool_call(plain name)
+    │  model calls the tool ──► wrapper: cap check, faults.wrap_tool, span.tool_call(plain name),
+    │                           add returned refs to evidence_seen
     │  model submits via StructuredOutput
     ▼
   ResultMessage.structured_output ──► pydantic validate ──► one retry on failure
@@ -73,8 +76,9 @@ trace.span closes ──► end event with status
 → SpecialistRun(status ok | partial | failed | timeout)
 ```
 
-The per-specialist timeout (`asyncio.wait_for`) wraps the span from outside, so a timeout
-is recorded as `timeout` in the trace. `run_specialist` never raises: the fan-out and the
+The stage timeout (`asyncio.wait_for`, 90 s, D7) wraps the span from outside, so a timeout
+is recorded as `timeout` in the trace. The whole run also has a 300 s backstop, which should
+never fire. `run_specialist` never raises: the fan-out and the
 D7 branches depend on getting a status back.
 
 ## Who sees what
@@ -112,21 +116,11 @@ assembly except guardrail violations.
 
 ---
 
-## Open questions found while writing this
+## Gaps found while writing this, and how they were settled
 
-These are gaps between the documents, not decisions. Settle them before or during step 6.
-
-1. **Timeouts don't add up.** D7 sets 90 s per specialist and 120 s for the whole run, but
-   the stages are sequential: fan-out (up to 90 s), then the runbook lookup (up to 90 s),
-   then synthesis. A slow but successful run can't fit in 120 s. Either the 120 s covers
-   the fan-out only, or the run budget needs raising.
-2. **The citation guardrail needs data the contracts don't carry.** D6 checks that every
-   evidence id appeared in a tool result from this run, but `SpecialistRun` (§4) records
-   only the queries sent, not the ids the tool returned. `run_specialist` must collect them,
-   for example as a code-side `evidence_seen: list[str]` field, or the orchestrator can't
-   run the check.
-3. **Synthesis and `run_specialist`.** D11 routes the synthesis call through the Agent SDK
-   too, but it has no tool. Decide whether `run_specialist` supports zero tools or synthesis
-   gets its own small function.
-4. **`result.md`.** D8 lists it in the run folder, but nothing writes it yet. It belongs to
-   stage 7.
+1. **Timeouts didn't add up** (90 s per specialist, 120 s per run, sequential stages). Now
+   every model stage has its own 90 s timeout and the run has a 300 s backstop (D7).
+2. **The citation guardrail had no data to check against.** `SpecialistRun` now carries
+   `evidence_seen`, filled by the tool wrapper (D6, §4).
+3. **Synthesis has no tool.** It goes through `run_specialist` as a zero-tool spec (D11).
+4. **Nothing wrote `result.md`.** `render.py` does now, from the CLI (D8).

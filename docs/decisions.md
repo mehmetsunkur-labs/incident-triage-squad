@@ -107,6 +107,10 @@ Stack: Python, uv project, run locally as a CLI.
   - Enforce in code: a `LEG-*` entry is never `runbook.matched`; every evidence id appears
     in a tool result from this run; `remediation` steps appear verbatim in the matched
     entry.
+  - "Appears in a tool result from this run" is checked against the union of every
+    `SpecialistRun.evidence_seen` (contracts §4): each reference the tool actually
+    returned, collected by the tool wrapper. With `--empty-tool`, that set is empty for the
+    affected corpus, so any citation from it is removed without special cases.
   - When a check fails, log it to the trace and move the claim to `open_questions`. Do not
     silently fix it.
   - `matched: null` plus RB-000 actions is decided by the prompt and checked in code.
@@ -120,14 +124,21 @@ Stack: Python, uv project, run locally as a CLI.
 - **Decision:**
   - Degrade, never crash: keep whatever finished, cap confidence at `low`, and add an open
     question naming the missing branch.
-  - 90 s per specialist (D2), 120 s for the whole run. API errors use the SDK's built-in
-    retries (2).
+  - Every stage that calls the model has its own 90 s timeout: each fan-out specialist,
+    the runbook lookup and synthesis. Each ends as a `timeout` status that the branches
+    below handle, so the run still produces an output.
+  - The whole run has a 300 s backstop, above 3 × 90 s plus overhead. It fires only if
+    something hangs outside a stage timeout, which is a bug, so it fails the run rather
+    than degrading it.
+  - API errors use the SDK's built-in retries (2).
   - If the log analyst produced no result, there is no established symptom, so the runbook
     lookup is skipped: `runbook.matched` is `null`, `why` says the lookup did not run and
     why, and a single `orchestrator` action says to follow RB-000 until a symptom is
     established. No steps are invented.
 - **Why:** A partial answer with honest confidence is more useful to a duty manager than a
-  stack trace, and it's what the iteration prompts test. The runbook lookup may only see a
+  stack trace, and it's what the iteration prompts test. The stages run in sequence, so a
+  single 120 s run budget (the original value) couldn't fit a slow but successful run;
+  per-stage timeouts can. The runbook lookup may only see a
   symptom (D4); the historian's output is not one, and the raw report carries the
   reporter's theory.
 - **Consider later:** Feeding the lookup the reporter's described symptom instead, if
@@ -139,7 +150,8 @@ Stack: Python, uv project, run locally as a CLI.
 - **Status:** decided
 - **Decision:**
   - `out/runs/<incident>-<timestamp>/` containing `trace.jsonl`, `result.json`,
-    `result.md`.
+    `result.md`. `result.md` is rendered by `render.py` from the validated
+    `TriageResult`; it is formatting only, and the CLI writes it next to `result.json`.
   - `trace.jsonl` uses the grader's event format exactly (see
     [contracts.md §9](contracts.md#9-trace-events)): `ts` in seconds since run start,
     `type` of `start` / `end` / `tool_call` / `input`, plus our own extra fields (tokens,
@@ -229,6 +241,10 @@ Stack: Python, uv project, run locally as a CLI.
     (`search_logs`), never taken from the message stream. The stream also carries the
     MCP-prefixed name and the harness's `StructuredOutput` call, either of which would
     fail the grader's tool check.
+  - **Zero-tool specs.** The tool is optional in a spec. With none, no MCP server is
+    created and `allowed_tools=[]`; everything else (span, timeout, structured output,
+    validation, retry, status) is the same. The synthesis call is a zero-tool spec, so it
+    goes through `run_specialist` rather than a second function.
   - **Structured output.** `output_format={"type": "json_schema", "schema": ...}` with the
     pydantic model's schema; the parsed object arrives in `ResultMessage.structured_output`.
     Validate it with pydantic anyway and retry once (as D2): the schema does not constrain

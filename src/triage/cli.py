@@ -10,6 +10,7 @@ import typer
 
 from . import evals, faults as faults_mod, orchestrator
 from .config import ConfigError, load_settings, read_incident
+from .render import render
 from .schemas import RunbookInput
 from .trace import Trace, new_run_dir, timing_summary
 
@@ -90,7 +91,8 @@ def run(
         typer.echo(f"run folder: {run_dir}")
         typer.echo(timing_summary(trace.path))
     (run_dir / "result.json").write_text(result.model_dump_json(indent=2) + "\n")
-    typer.echo(f"wrote {run_dir / 'result.json'}")
+    (run_dir / "result.md").write_text(render(result))
+    typer.echo(f"wrote {run_dir / 'result.json'} and result.md")
 
 
 @app.command("eval-runbook")
