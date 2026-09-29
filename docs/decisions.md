@@ -210,25 +210,49 @@ Stack: Python, uv project, run locally as a CLI.
     Keep `effort` in `config.py` and apply it only if the SDK exposes it.
   - **Amends D2:** the SDK drives the turns. The tool-call cap is a counter inside the
     tool function: past the cap it returns an error telling the agent to finish, and the
-    run is marked `partial`. `max_turns` is a backstop. Timeouts use `asyncio.wait_for`
-    around each call.
+    run is marked `partial`. `max_turns` is a backstop set to the cap plus 3, because
+    submitting structured output and finishing take turns of their own. Timeouts use
+    `asyncio.wait_for` around each call.
   - **Isolation**, per specialist:
-    - allow only that agent's own tool, with every built-in Claude Code tool disallowed
-    - load no settings, `CLAUDE.md` or memory (`setting_sources` empty)
+    - `tools=[]`, which removes every built-in Claude Code tool so the model never sees
+      them. `allowed_tools` lists only the agent's own MCP tool, to pre-approve it.
+    - `setting_sources=[]` passed explicitly. Leaving it `None` loads user, project and
+      local settings, including hooks and `CLAUDE.md`.
+    - `strict_mcp_config=True`, so only our MCP server is loaded
     - run from an empty temporary working directory
     - use our own `system_prompt`, replacing the Claude Code default
-  - **Tools.** Each tool is an in-process MCP tool wrapping the same `tools.py` function.
-    The trace records the plain tool name (`search_logs`), not the MCP-prefixed one, so the
-    grader's tool check passes.
-  - **Structured output.** Use the SDK's JSON-schema output option if the installed version
-    has one. Otherwise parse the final message as JSON, validate with pydantic, and retry
-    once (as D2).
+  - **Tools.** Each tool is an in-process MCP tool wrapping the same `tools.py` function,
+    with `ToolAnnotations(maxResultSizeChars=...)` set well above the largest result.
+    Past that limit Claude Code saves the result to a file and shows only a preview, which
+    an agent without `Read` cannot open.
+  - **Trace.** `tool_call` events are written by our tool wrapper with the plain name
+    (`search_logs`), never taken from the message stream. The stream also carries the
+    MCP-prefixed name and the harness's `StructuredOutput` call, either of which would
+    fail the grader's tool check.
+  - **Structured output.** `output_format={"type": "json_schema", "schema": ...}` with the
+    pydantic model's schema; the parsed object arrives in `ResultMessage.structured_output`.
+    Validate it with pydantic anyway and retry once (as D2): the schema does not constrain
+    string contents, and in the spike the model wrote `file:line — <log text>` as evidence.
+    The prompt states the evidence format exactly, and the D6 validator rejects anything
+    else.
+  - **The `StructuredOutput` tool is accepted.** The harness adds it to deliver the
+    structured answer. It is effectively the `submit_findings` tool D2 rejected, but it is
+    an output channel that cannot reach any corpus, so it does not break "exactly one
+    data tool".
   - **Isolation test.** A test asks each specialist to read a file under `data/` directly,
     list the directory and run a shell command, and asserts that no call other than its own
     tool is made and no file content comes back.
-  - **Verify first.** Check option names (`allowed_tools`, `disallowed_tools`,
-    `setting_sources`, `system_prompt`, `max_turns`, structured output) against the current
-    docs at code.claude.com/docs/en/agent-sdk before building on them.
+  - **Verified in the step 5 spike** (`claude-agent-sdk` 0.2.161, Claude Code 2.1.284):
+    - the Claude Code login works with no key
+    - `claude-opus-5-5` and `effort="medium"` are accepted
+    - the tool list at startup is only `StructuredOutput` plus our tool
+    - an adversarial prompt produced no file, directory or shell call
+    - a canary word in `CLAUDE.md` in the working directory never appeared in any output
+    - structured output came back parsed
+    - two queries ran concurrently: 9.2 s and 9.9 s alone, 9.9 s together
+  - **Not yet verified** (step 6 tests): the tool-call cap, cancellation by
+    `asyncio.wait_for` and cleanup of its process, auto-memory injection with
+    `setting_sources=[]`, and the `maxResultSizeChars` threshold.
 - **Why:** No Console API access is available. The Agent SDK uses the Claude Code login as
   intended, unlike putting a subscription token in `.env`. Confining it to
   `run_specialist` keeps the parallel fan-out and join in our own code, which is the part

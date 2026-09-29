@@ -123,19 +123,32 @@ and no built-in tool appears when the prompt invites one ("read ./README.md").
 ## Step 6. Specialist loop and log analyst
 
 - `agent.py`: `run_specialist(spec, context)` per D2 as amended by D11:
-  - A Claude Agent SDK query with the specialist's one tool as an in-process MCP tool,
-    every other tool disallowed, no settings loaded, an empty temporary working directory
-    and the prompt file as `system_prompt`.
+  - A Claude Agent SDK query with the options D11 fixes:
+    - the specialist's one tool as an in-process MCP tool, with `maxResultSizeChars` raised
+    - `tools=[]`, `allowed_tools` set to that tool only, `strict_mcp_config=True`
+    - `setting_sources=[]`, set explicitly
+    - an empty temporary working directory, and the prompt file as `system_prompt`
   - The tool-call cap is a counter in the tool wrapper; past the cap it returns an error
-    telling the agent to finish. `max_turns` is a backstop, and `asyncio.wait_for` enforces
-    the timeout.
-  - Structured output through the SDK if the spike found support. Otherwise parse the final
-    message as JSON and validate with pydantic, with one retry.
-  - The tool wrapper writes `tool_call` trace events with the plain tool name.
+    telling the agent to finish. `max_turns` is the cap plus 3, and `asyncio.wait_for`
+    enforces the timeout.
+  - Structured output through `output_format` with the pydantic model's schema, read from
+    `ResultMessage.structured_output`, then validated with pydantic, with one retry.
+  - The tool wrapper writes `tool_call` trace events with the plain tool name. Nothing is
+    logged from the message stream, which also carries `StructuredOutput`.
   - Returns a `SpecialistRun` (contracts §4) and never raises; `status` reflects what
     happened.
-- Isolation test (D11): prompts inviting a file read, a directory listing and a shell
-  command produce no call other than the agent's own tool.
+- Tests for D11, including the items the spike did not verify:
+  - **Isolation:** prompts inviting a file read, a directory listing and a shell command
+    produce no call other than the agent's own tool.
+  - **Settings:** a canary in `CLAUDE.md` in the working directory, and one in
+    auto-memory, never appears in output.
+  - **Cap:** with `max_tool_calls=2`, the third call gets the finish error, the run is
+    `partial`, and a result still comes back.
+  - **Timeout:** a tool that sleeps past the timeout ends the run as `timeout`, and no
+    Claude Code process is left running.
+  - **Large results:** a tool result larger than the biggest real `search_changes` output
+    reaches the model inline, not as a file preview.
+  - **Evidence format:** every evidence string in the result passes the D6 validator.
 - `prompts/log_analyst.md`: role, the incident, the hypotheses note, the evidence rule,
   when to stop. No change ids, ISO timestamps or `file.log:n` examples (D8).
 - A temporary debug command runs the analyst alone on INC-2043.
