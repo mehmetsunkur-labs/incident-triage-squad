@@ -278,9 +278,9 @@ Stack: Python, uv project, run locally as a CLI.
   - **Retry through `ClaudeSDKClient`.** Keep the session and send one follow-up: "Your
     answer failed validation: `<errors>`. Resubmit it corrected, without new searches
     unless needed." A fresh query would repeat every search and could change the findings.
-    The retry runs inside the same stage timeout and tool-call cap. Not yet verified:
-    whether `output_format` applies to a follow-up in the same session. If it doesn't,
-    fall back to a fresh `query` with the errors appended.
+    The retry runs inside the same stage timeout and tool-call cap. Verified in the
+    step 6a spike: the follow-up returns `structured_output` in the schema, and it
+    validated, with no new searches.
   - **The `StructuredOutput` tool is accepted.** The harness adds it to deliver the
     structured answer. It is effectively the `submit_findings` tool D2 rejected, but it is
     an output channel that cannot reach any corpus, so it does not break "exactly one
@@ -296,7 +296,34 @@ Stack: Python, uv project, run locally as a CLI.
     - a canary word in `CLAUDE.md` in the working directory never appeared in any output
     - structured output came back parsed
     - two queries ran concurrently: 9.2 s and 9.9 s alone, 9.9 s together
-  - **Not yet verified** (step 6 tests): the tool-call cap, cancellation by
+  - **Verified in the step 6a spike** (`spikes/step6_sdk.py`, written by Claude, same
+    versions; INC-2043 with the real `search_logs` and a stub prompt):
+    - `ClaudeSDKClient` works with the D11 options. Each `query` + `receive_response`
+      yields, in order: `SystemMessage(init)` (repeated on every query in the session),
+      `RateLimitEvent`s, `AssistantMessage`s holding `TextBlock`, `ThinkingBlock` or
+      `ToolUseBlock`, `UserMessage`s carrying tool results, `SystemMessage(thinking_tokens)`,
+      and a final `ResultMessage`.
+    - The full `LogAnalystResult` schema, with `$defs`, nullable fields and enums, is
+      accepted by `output_format`, and `structured_output` validates with pydantic. No
+      inlining is needed.
+    - The follow-up retry works (see Structured output above).
+    - A successful result has `subtype="success"`, `is_error=False`,
+      `terminal_reason="completed"`, and `stop_reason="tool_use"`, because the answer is a
+      `StructuredOutput` call. Don't treat `stop_reason` as a failure signal.
+    - Running out of turns gives `subtype="error_max_turns"`, `is_error=True`,
+      `terminal_reason="max_turns"`, `errors=["Reached maximum number of turns (1)"]` and
+      `structured_output=None`. Map this to `failed`.
+    - `num_turns` doesn't count one per tool call: with `max_turns=1` it reported 2, and a
+      normal run took 6 or 7. Keep `max_turns` a generous backstop.
+    - The model makes parallel tool calls: several `ToolUseBlock`s before their results.
+      The cap counter has to hold when the handler is called several times in one turn.
+    - The prompt's "use at most 4 searches" was ignored (5 searches). The cap must be
+      enforced in code, as designed.
+    - `total_cost_usd` on a `ResultMessage` is cumulative for the session: the follow-up's
+      value includes the first attempt.
+    - A run cost about $0.15 as reported (`total_cost_usd`), charged against the
+      subscription rather than billed.
+  - **Not yet verified** (step 6b tests): the tool-call cap, cancellation by
     `asyncio.wait_for` and cleanup of its process, auto-memory injection with
     `setting_sources=[]`, and the `maxResultSizeChars` threshold.
 - **Why:** No Console API access is available. The Agent SDK uses the Claude Code login as
