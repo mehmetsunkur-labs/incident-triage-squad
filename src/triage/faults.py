@@ -3,12 +3,13 @@
 Faults are applied inside the tool or agent, so the system really experiences them:
 
 - empty tool: the tool still runs, but returns zero matches for every query
-- failing agent: the agent raises InjectedFault when it starts
+- failing agent: the agent raises InjectedFault on its first call, once its session is open
 - delayed agent: the agent sleeps before starting, to run past its timeout
 - tool-call cap: overrides Settings.max_tool_calls for every specialist
 
 Your agent loop calls `before_agent(...)` at the start of each specialist, inside its trace
-span, and builds each specialist's tool with `wrap_tool(...)`.
+span, `before_first_call(...)` once the agent's session is open and before its first model
+call, and builds each specialist's tool with `wrap_tool(...)`.
 """
 
 import asyncio
@@ -88,5 +89,11 @@ async def before_agent(agent: str, faults: Faults) -> None:
     """Call at the start of every specialist, inside its trace span."""
     if delay := faults.delay_agents.get(agent):
         await asyncio.sleep(delay)
+
+
+def before_first_call(agent: str, faults: Faults) -> None:
+    """Call once the agent's session is open, before its first model call (D10: the agent
+    raises on its first call). Failing here rather than at the start of the span means a
+    failed agent has really started, as a real one would have, so its span has a length."""
     if agent in faults.fail_agents:
         raise InjectedFault(f"injected failure in {agent}")
