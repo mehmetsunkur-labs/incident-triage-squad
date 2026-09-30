@@ -229,6 +229,10 @@ listed here because they are the same kind of change.
   A real agent failure also happens after its CLI has started. With the real CLI the
   failed historian's span is now about 1.7 s, with no model call made. The grader's
   check prompted the look, and D10's wording decided the fix.
+- **Result:** rerun, V-2043-historian-fails passes every hard check: the historian fails
+  at 1.27 s, overlapping the analyst by 1.26 s, with confidence `low`, no `CHG-`
+  citations and 10 open questions. All 6 variants pass, so step 11 is done. The other
+  five ran before this change, which only affects `--fail-agent`, a flag none of them use.
 
 ## Step 10 status
 
