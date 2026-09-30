@@ -239,5 +239,18 @@ Stability, as `make stability ID=<id> N=5` batches, runs passing every hard chec
 | B | same | 5/5 | | |
 | C | + entry 12 prompt | 4/5 (entry 13) | 5/5 | 5/5 |
 | D, E | + entry 13 prompt, N=10 | 10/10 | 9/10 (entry 14) | 9/10 (entry 14) |
+| F | + entry 14 prompts, N=10 | **10/10** | **10/10** | **10/10** |
 
-Next: all three incidents with N=10 on entry 14's prompts.
+Batch F was also graded run by run with each run's trace (`grade.py run <id> result.json
+--trace trace.jsonl`, since `make stability` grades without traces): 30/30 pass every
+hard check, the trace checks included. That meets step 10's done condition.
+
+What batch F still shows, none of it a hard failure:
+- Soft checks: INC-2043 names LEG-014 as a near miss in 8/10 and rules out the express
+  checkout flag in 7/10 (2/10 in batch D); INC-2051 names RB-008 in 8/10. The near misses
+  are missed when the runbook lookup's searches never return the entry.
+- The search cap is still hit often: INC-2043's analyst 8/10, INC-2051's historian 9/10,
+  INC-2062's runbook lookup 10/10. What a capped specialist couldn't check now goes to
+  `open_questions`.
+- Runs take about 123 s (median), 171 s at worst, when every agent wrote long answers.
+  No timeouts, failures or `api_retry` in 30 runs.
