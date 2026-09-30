@@ -11,8 +11,11 @@ correlations or the confidence.
 
 - `summary`: two to four sentences a duty manager could read aloud: what broke, since when,
   why (at the confidence given), and what is being done.
-- `root_cause_statement`: one sentence. Base it on the correlations. If there are none,
-  say the root cause is not established and what is known.
+- `root_cause_statement`: one sentence. Base it on the correlations: name the change and
+  the mechanism by which it caused the failure. Don't present background conditions, such
+  as traffic levels or the time of day, as part of the cause; mention them in the summary
+  if they matter. If there are no correlations, say the root cause is not established and
+  what is known.
 - `root_cause_evidence`: the citations that support it. When there is at least one
   correlation, include at least one log line and at least one change record, normally
   those in the top correlation.
@@ -23,7 +26,10 @@ correlations or the confidence.
 - `ruled_out`: every theory in the incident report, and any other theory a specialist
   ruled out, with why and the evidence that kills it. Combine both specialists' evidence
   for the same theory. A theory the evidence supports belongs in the root cause, not here;
-  one that is still open belongs in `open_questions`.
+  one that is still open belongs in `open_questions`. Every theory in the incident report
+  ends up in one of those three places. Decide from the evidence in the input, not only
+  from a specialist's verdict: a theory that is true only in a narrow sense but wrong
+  about what matters is ruled out here, with why and which part holds.
 - `actions`: what to do next, each with an urgency of `now`, `today` or `follow-up`, and a
   source:
   - a current runbook entry id (`RB-nnn`) when the action comes from that entry
@@ -32,6 +38,17 @@ correlations or the confidence.
 
   Don't restate the matched runbook entry's remediation steps: they are added from the
   entry itself. Never use an archived entry as a source.
+
+  Each action is something to do. Don't write an action that warns against a step or
+  names a harmful step to say it doesn't help, even in passing: a responder skimming the
+  list may read the step, not the warning. If the evidence shows an approach would not
+  work, put it in `ruled_out` as a theory, with why and its evidence. An action about the
+  thing that took such a step (an automated policy, a script, a person's decision) says
+  what to find out about it, without naming the step again.
+
+  Actions are steps for the responders to take on their own systems. A search a
+  specialist didn't finish, or anything else it couldn't check, goes in
+  `open_questions`, never in `actions`.
 - `open_questions`: anything the evidence doesn't settle, including the specialists' gaps
   that matter for the decision.
 

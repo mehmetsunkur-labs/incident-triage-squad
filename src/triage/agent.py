@@ -8,13 +8,15 @@ a SpecialistRun and never raises. Behaviour it relies on was established in the 
 import asyncio
 import json
 import tempfile
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from claude_agent_sdk import (
-    ClaudeAgentOptions, ClaudeSDKClient, ResultMessage, SystemMessage, ToolAnnotations,
+    AssistantMessage, ClaudeAgentOptions, ClaudeSDKClient, RateLimitEvent, ResultMessage,
+    SystemMessage, TextBlock, ThinkingBlock, ToolAnnotations, ToolUseBlock, UserMessage,
     create_sdk_mcp_server, tool,
 )
 from pydantic import BaseModel, ValidationError
@@ -31,6 +33,12 @@ CAP_MESSAGE = (
     "Tool-call limit reached ({cap}). Do not search again. Submit your answer now from what "
     "you have, and list what you could not check in gaps."
 )
+TEXT_PREVIEW = 200  # chars of a text reply kept in the trace
+MAX_SYSTEM_DATA = 2000  # a system message's data past this is traced as its keys only
+USAGE_KEYS = ("input_tokens", "output_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+# A reply's usage is the API's snapshot from the start of the response, so its output count
+# is not the final one; only the input side is traced per reply (totals are on `end`).
+REPLY_USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
 RETRY_MESSAGE = (
     "Your answer failed validation:\n\n{errors}\n\nResubmit it corrected, without new "
     "searches unless needed."
@@ -84,8 +92,35 @@ def references(result: dict) -> list[str]:
     return [f"{r['file']}:{r['line']}" if "file" in r else r["id"] for r in result.get("results", [])]
 
 
+class StderrLog:
+    """The CLI's stderr, one timestamped line at a time, into stderr-<agent>.log beside the
+    trace. The file is only created if the CLI writes something; the count goes on `end`."""
+
+    def __init__(self, path: Path, span: Span):
+        self.path, self.span, self.lines, self.f, self.closed = path, span, 0, None, False
+
+    def __call__(self, line: str) -> None:
+        if self.closed:
+            return
+        self.lines += 1
+        self.span.extra["stderr_lines"] = self.lines
+        try:
+            if self.f is None:
+                self.f = self.path.open("a")
+            self.f.write(f"{self.span.trace.elapsed():.3f} {line.rstrip()}\n")
+            self.f.flush()
+        except (OSError, ValueError):
+            pass
+
+    def close(self) -> None:
+        self.closed = True
+        if self.f is not None:
+            self.f.close()
+
+
 def _options(spec: SpecialistSpec, settings: Settings, system_prompt: str, cwd: str,
-             state: ToolState | None, cap: int) -> ClaudeAgentOptions:
+             state: ToolState | None, cap: int, stderr: Callable[[str], None] | None = None,
+             debug_file: Path | None = None) -> ClaudeAgentOptions:
     servers, allowed = {}, []
     if state is not None:
         sdk_tool = tool(spec.tool, spec.tool_description,
@@ -100,16 +135,98 @@ def _options(spec: SpecialistSpec, settings: Settings, system_prompt: str, cwd: 
         # num_turns isn't one per tool call (6a spike), so this is a generous backstop.
         max_turns=2 * cap + 4,
         output_format={"type": "json_schema", "schema": spec.output_model.model_json_schema()},
+        stderr=stderr, extra_args={"debug-file": str(debug_file)} if debug_file else {},
     )
 
 
+def _seen(span: Span, kind: str) -> float:
+    """Note a message from the CLI on the span, so `end` says where a stalled run stopped
+    (messages, last_message, last_message_ts), and return seconds since the previous one."""
+    now = span.trace.elapsed()
+    since = now - span.extra.get("last_message_ts", span.started)
+    span.extra.update(messages=span.extra.get("messages", 0) + 1, last_message=kind,
+                      last_message_ts=round(now, 3))
+    return round(since, 3)
+
+
+def _usage(usage: dict | None, keys: tuple[str, ...] = USAGE_KEYS) -> dict | None:
+    return {k: usage[k] for k in keys if k in usage} if usage else None
+
+
+def _thinking(span: Span, data: dict) -> None:
+    """Fold the CLI's thinking progress (about one message a second while the model thinks)
+    into one `thinking` field on `end`: how many updates, the estimated tokens, and when
+    thinking was first and last reported. A gap after `last_ts` is the model writing."""
+    t = span.extra.setdefault("thinking", {"updates": 0, "est_tokens": 0,
+                                           "first_ts": span.extra["last_message_ts"]})
+    t["updates"] += 1
+    t["est_tokens"] += data.get("estimated_tokens_delta") or 0
+    t["last_ts"] = span.extra["last_message_ts"]
+
+
+def _blocks(content) -> list[dict]:
+    """What a model reply held, by kind and size: enough to tell thinking from text from a
+    tool request without copying the reply. Tool requests keep the SDK's name; they are not
+    `tool_call` events, which only the tool wrapper writes (D11)."""
+    out = []
+    for b in content:
+        if isinstance(b, ThinkingBlock):
+            out.append({"type": "thinking", "chars": len(b.thinking)})
+        elif isinstance(b, TextBlock):
+            out.append({"type": "text", "chars": len(b.text), "preview": b.text[:TEXT_PREVIEW]})
+        elif isinstance(b, ToolUseBlock):
+            out.append({"type": "tool_use", "name": b.name})
+        else:
+            out.append({"type": type(b).__name__})
+    return out
+
+
+def _system_data(data: dict) -> dict:
+    """A system message's fields for the trace, e.g. an api_retry's attempt, delay and error
+    status; the envelope keys are dropped, and a large payload is reduced to its keys."""
+    data = {k: v for k, v in data.items() if k not in ("type", "subtype", "session_id", "uuid")}
+    return data if len(json.dumps(data, default=str)) <= MAX_SYSTEM_DATA else {"keys": sorted(data)}
+
+
 async def _receive(client, span: Span) -> ResultMessage | None:
-    """Read one response; record the tools the session reports at start-up."""
-    result = None
+    """Read one response and trace what the CLI reports along the way, so a stall can be
+    told apart from slow work (step 10): every model reply (`sdk_message`), every system
+    message other than init, such as the CLI's API retries (`sdk_system`), and usage-limit
+    status (`rate_limit`). The init message gives the session's tools and id, and thinking
+    progress is summarised on `end` rather than traced line by line.
+
+    The CLI sends one AssistantMessage per content block, each repeating its API call's
+    usage, so usage is traced on the first block of each call only, input side only."""
+    result, last_id = None, None
     async for msg in client.receive_response():
-        if isinstance(msg, SystemMessage) and msg.subtype == "init":
-            span.extra.setdefault("init_tools", msg.data.get("tools"))
+        if isinstance(msg, SystemMessage):
+            since = _seen(span, f"system:{msg.subtype}")
+            if msg.subtype == "init":
+                span.extra.setdefault("init_tools", msg.data.get("tools"))
+                span.extra.setdefault("init_s", round(span.extra["last_message_ts"] - span.started, 3))
+                span.extra.setdefault("session_id", msg.data.get("session_id"))
+            elif msg.subtype == "thinking_tokens":
+                _thinking(span, msg.data)
+            else:
+                span.trace.emit(span.agent, "sdk_system", subtype=msg.subtype, since_prev_s=since,
+                                data=_system_data(msg.data))
+        elif isinstance(msg, AssistantMessage):
+            since = _seen(span, "assistant")
+            usage = _usage(msg.usage, REPLY_USAGE_KEYS) if msg.message_id != last_id else None
+            last_id = msg.message_id
+            span.trace.emit(span.agent, "sdk_message", since_prev_s=since, message_id=msg.message_id,
+                            blocks=_blocks(msg.content), usage=usage,
+                            stop_reason=msg.stop_reason, error=msg.error)
+        elif isinstance(msg, UserMessage):
+            _seen(span, "user")  # tool results going back to the model; tool_call has them
+        elif isinstance(msg, RateLimitEvent):
+            since = _seen(span, "rate_limit")
+            info = msg.rate_limit_info
+            span.trace.emit(span.agent, "rate_limit", status=info.status, utilization=info.utilization,
+                            rate_limit_type=info.rate_limit_type, resets_at=info.resets_at,
+                            since_prev_s=since)
         elif isinstance(msg, ResultMessage):
+            _seen(span, "result")
             result = msg
     return result
 
@@ -154,8 +271,12 @@ async def run_specialist(spec: SpecialistSpec, context: Any, settings: Settings,
             span.input(f"{system_prompt}\n\n---\n\n{user}")
             state = ToolState(spec.tool, settings.data_dir, cap, faults, span) if spec.tool else None
             box["state"] = state
-            with tempfile.TemporaryDirectory(prefix=f"triage-{spec.agent}-") as tmp:
-                options = _options(spec, settings, system_prompt, str(cwd or tmp), state, cap)
+            run_dir = trace.path.parent
+            stderr = StderrLog(run_dir / f"stderr-{spec.agent}.log", span)
+            debug_file = run_dir / f"debug-{spec.agent}.log" if settings.sdk_debug else None
+            with tempfile.TemporaryDirectory(prefix=f"triage-{spec.agent}-") as tmp, closing(stderr):
+                options = _options(spec, settings, system_prompt, str(cwd or tmp), state, cap,
+                                   stderr, debug_file)
                 async with client_factory(options) as client:
                     await client.query(user)
                     msg = await _receive(client, span)
@@ -166,7 +287,10 @@ async def run_specialist(spec: SpecialistSpec, context: Any, settings: Settings,
                         msg = await _receive(client, span)
                         parsed, error, _ = _parse(spec.output_model, msg)
             if msg is not None:
-                span.extra.update(turns=msg.num_turns, cost_usd=msg.total_cost_usd)
+                span.extra.update(turns=msg.num_turns, cost_usd=msg.total_cost_usd,
+                                  api_s=round(msg.duration_api_ms / 1000, 1), usage=_usage(msg.usage))
+                if msg.api_error_status:
+                    span.extra["api_error_status"] = msg.api_error_status
             status: RunStatus = "failed" if parsed is None else ("partial" if state and state.cap_hit else "ok")
             span.status, span.error = status, error
             return status, parsed, error

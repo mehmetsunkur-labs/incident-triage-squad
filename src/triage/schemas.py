@@ -240,6 +240,7 @@ class Correlation(Strict):
     minutes_before_first_failure: float
     matched_keys: list[str]
     strength: Strength
+    link: Literal["same_service", "co_located", "infrastructure"]
 
 
 class SynthesisInput(Strict):

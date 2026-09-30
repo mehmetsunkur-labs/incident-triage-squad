@@ -25,6 +25,7 @@ class Span:
     def __init__(self, trace: "Trace", agent: str):
         self.trace, self.agent = trace, agent
         self.status, self.error, self.extra = "ok", None, {}
+        self.started = trace.elapsed()
 
     def input(self, payload: str) -> None:
         self.trace.emit(self.agent, "input", payload=payload)

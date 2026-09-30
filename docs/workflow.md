@@ -79,8 +79,9 @@ trace.span closes ──► end event with status
 → SpecialistRun(status ok | partial (cap hit) | failed | timeout)
 ```
 
-The stage timeout (`asyncio.wait_for`, 90 s, D7) wraps the span from outside, so a timeout
-is recorded as `timeout` in the trace. The whole run also has a 300 s backstop, which should
+The stage timeout (`asyncio.wait_for`; 150 s, or 180 s for synthesis, D7) wraps the span
+from outside, so a timeout is recorded as `timeout` in the trace. The whole run also has a
+600 s backstop, which should
 never fire. `run_specialist` never raises: the fan-out and the
 D7 branches depend on getting a status back.
 
@@ -122,7 +123,8 @@ assembly except guardrail violations.
 ## Gaps found while writing this, and how they were settled
 
 1. **Timeouts didn't add up** (90 s per specialist, 120 s per run, sequential stages). Now
-   every model stage has its own 90 s timeout and the run has a 300 s backstop (D7).
+   every model stage has its own timeout and the run has a backstop (D7; values revised in
+   step 10).
 2. **The citation guardrail had no data to check against.** `SpecialistRun` now carries
    `evidence_seen`, filled by the tool wrapper (D6, §4).
 3. **Synthesis has no tool.** It goes through `run_specialist` as a zero-tool spec (D11).

@@ -62,5 +62,7 @@ Every id you return must be one the tool returned to you.
 ## When to stop
 
 You have a limited number of searches. Stop as soon as you have a match, or have searched
-each part of the symptom and found none, and submit your answer. If the tool tells you the
+each part of the symptom and found none, and submit your answer. Keep one search in reserve
+for the no-match entry, so that if nothing fits you can still return it as the
+`fallback`. If the tool tells you the
 limit has been reached, stop searching and answer immediately with what you have.
