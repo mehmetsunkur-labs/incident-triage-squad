@@ -35,7 +35,7 @@ wrote.
 | 9 Orchestrator | written by Claude, awaiting your review: INC-2043 passes every hard check |
 | 10 Three incidents | done: 10/10 runs of each incident pass every hard check with their traces (batch F). Join, stall tracing and prompt revisions by Claude for review (D5, D7, D8); see `docs/iteration-log.md` |
 | 11 Faults and variants | done: all 6 variants pass every hard check. `--fail-agent` now fails on the first call as D10 says (by Claude, iteration log entry 15) |
-| 12 Iteration prompts | 7 of 8 recorded in `docs/iteration-log.md` (by Claude, from the variant, runbook and stability runs); the follow-up question needs D12 first |
+| 12 Iteration prompts | 7 of 8 recorded in `docs/iteration-log.md` (by Claude, from the variant, runbook and stability runs); the follow-up question: D12 drafted by Claude, proposed, awaiting review |
 | 13 | yours |
 
 ---

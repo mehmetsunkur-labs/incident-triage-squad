@@ -392,3 +392,96 @@ Stack: Python, uv project, run locally as a CLI.
     learning exercise; re-check the terms if that changes.
 - **Consider later:** switching to the raw `anthropic` SDK (D1 and D2 as originally
   written) once Console access exists. The debrief can then compare the two.
+
+## D12. A follow-up question to one specialist
+
+- **Question:** For the step 12 iteration prompt, which specialist gets a second question,
+  when, with what context and budget, and how does its answer reach the join?
+- **Status:** proposed (drafted by Claude for review; not built)
+- **Decision:**
+  - **Who: the change historian.** The follow-up can't do what matters most for
+    confidence, turning a weak link strong, because on INC-2062, the only incident that
+    ends on a weak link, the strong rule can't be met. CHG-1048 *removed* a CPU limit, so
+    there's no changed value for the logs to show, and they have no line with a CPU limit
+    in it. Asking the analyst again would re-find the node pressure and throttling it
+    already reports. What the historian leaves open instead is change-side: in batch F it
+    often hit its cap before checking whether the change was later reverted, or what else
+    touched the co-located service. That shows up as an open question ("Was
+    media-transcoder's CPU limit restored by a later change?"). Only the change log can
+    answer it.
+  - **Trigger, in code after the first join (D5):** the top correlation is `weak`, and
+    the historian returned a result. That's all of the following:
+    - no follow-up when the result is `high`: INC-2043 and INC-2051
+    - none when there's no candidate at all (the `--empty-tool search_changes` variants),
+      because a second search of an empty log only costs time
+    - none when either specialist has no result (the fail and timeout variants)
+
+    So today it fires on INC-2062 and V-2062-no-runbook-hits only.
+  - **Context:** a question built by a code template, in the historian's own terms.
+    - It names:
+      - the top candidate's change id and services
+      - the other services and the node or host that the co-location link found
+      - the incident date the historian already has from the report
+    - It asks two things: is there a later change that reverts or supersedes the
+      candidate, and is there any change to the other services on that node or host?
+    - It contains no log lines, `file.log:n` references or ISO timestamps, and the
+      template is checked against those patterns like `RunbookInput` is (contracts §5).
+      Those are what the grader's context-leak check looks for in the historian's input.
+    - A node or service name taken from the logs does reach the historian. That is the
+      point of the second round, and the leak check allows it, but it is a deliberate
+      exception to D4's "neither sees the other".
+  - **Budget:** 3 more searches. V-2043-tool-cap-3 found 3 enough for a targeted question.
+    Timeout 60 s. The worst case is 150 + 60 + 150 + 180 s = 540 s, inside the 600 s run
+    backstop (D7).
+  - **Same session, same span.** The historian's session stays open after its first
+    answer, and the follow-up is a second query in it. So it remembers what it searched,
+    and the question can be short. The grader forces this choice. It keeps one span per
+    agent name and lets a later `start` overwrite an earlier one, so the options are:
+    - a second `change_historian` span would replace the first-round span, which begins
+      after the fan-out, and `trace.concurrent` fails
+    - a new agent name fails `trace.tools_sandboxed`, whose allowed-tools table only
+      knows the four agents
+    - holding the session open, the chosen option, gives one `change_historian` span from
+      the historian's start until the orchestrator releases it
+
+    The span then truly covers the session's life, idle while the analyst finishes and
+    the join runs. The follow-up's question is traced as a second `input` event, which
+    the grader leak-checks, and its searches as ordinary `tool_call`s.
+  - **Merging:** the follow-up returns a `ChangeHistorianResult` like the first round.
+    - Changes are merged by `change_id`; the follow-up's copy wins.
+    - `hypotheses_checked` are appended.
+    - `gaps` come from the follow-up, which is asked to restate what is still unchecked.
+    - `evidence_seen` is the union, so the guardrails accept the new citations.
+    - The join and the confidence rule rerun on the merged result. Confidence can move
+      either way: a revert found would change the candidates. The orchestrator's `join`
+      event records the first-round and final confidence, and a `follow_up` event
+      records the trigger and the question.
+  - **Failure:** if the follow-up times out, fails or doesn't validate, the first-round
+    result stands unchanged, with an open question naming the follow-up and its status.
+    Confidence isn't capped, because the first round was complete. The follow-up can only
+    add.
+  - **Switch:** `triage run --no-follow-up`, so the experiment can compare batches with
+    and without it.
+- **Why:** The iteration prompt asks what a second question adds and what it costs.
+  Asking the historian on weak links targets the gap the stability batches show, and the
+  code trigger keeps the rule testable and leaves the other incidents unchanged.
+  - **Expected result:** INC-2062's confidence stays `medium` (the strong rule can't be
+    met, as above). Its open questions about reverts and neighbouring changes get
+    answered instead.
+  - **Expected cost:** about 20 to 30 s and one more model call per triggered run, plus a
+    `run_specialist` split into a session that can be asked twice.
+- **How to test:** `make stability ID=INC-2062 N=10` with and without `--no-follow-up`.
+  Compare hard and soft checks, confidence, the open questions about reverts, and run
+  time. INC-2043 and INC-2051 should show no follow-up events.
+- **Changes if built:**
+  - `agent.py`: a specialist session that can take a second query with an extra cap;
+    `run_specialist` stays as the one-shot wrapper.
+  - `orchestrator.py`: the trigger, the question template, the merge and a rerun of the
+    join.
+  - `schemas.py`: the follow-up input.
+  - `contracts.md` §9: the `follow_up` event.
+  - `config.py`: follow-up cap and timeout.
+  - `cli.py`: the switch.
+- **Consider later:** asking the analyst instead when a weak link's changed value *could*
+  appear in the logs, but the analyst didn't search for it. None of the three incidents
+  needs that today.
