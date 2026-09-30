@@ -329,8 +329,22 @@ rejected it. A related finding: with no match, the lookup keeps searching until 
 RL-cpu-contention used all 8 searches and had a ninth refused (RL-peak-errors used 5),
 and INC-2062's lookup hit the cap in 10/10 runs. It still reached RB-000 each time.
 
-**A follow-up question to one specialist.** Not run: it changes the design, and needs D12
-in `decisions.md` first (plan step 12).
+**A follow-up question to one specialist.** Designed (D12) but not built, a design
+exercise. The analysis is the finding:
+- **Who:** the change historian, triggered in code when the top link is weak. That fires
+  on INC-2062 only.
+- **What it would add:** answers to the historian's change-side gaps, the questions it
+  left open after hitting its cap, like whether CHG-1048 was later reverted.
+- **What it would not add:** higher confidence. CHG-1048 removed a CPU limit, the logs
+  contain no limit values, and so INC-2062's link can't become strong however either
+  specialist is asked again. Checked with direct tool searches, no model.
+- **What it would cost:** about 20 to 30 s and one more model call per triggered run,
+  and a `run_specialist` that can be asked twice.
+- **What the grader forces:** the grader keeps one span per agent name and allows tools
+  only for the four agents it knows. So a follow-up in a second session breaks either
+  `trace.concurrent` (a second `change_historian` span) or `trace.tools_sandboxed` (a new
+  agent name). The design keeps the historian's session open and asks in the same span.
+  This is also what a fourth specialist would run into (step 13).
 
 **Five identical runs** (`make stability`, entries 11 to 14 and the stability table under
 step 10). On the final prompts, batch F: 10/10 runs of each incident pass every hard
