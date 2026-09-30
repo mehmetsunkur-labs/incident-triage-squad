@@ -214,6 +214,22 @@ listed here because they are the same kind of change.
   missed once, when the runbook lookup's three searches never returned the archived entry.
   No stall in 60 traced runs.
 
+## 15. A failed agent had a span of no length (step 11)
+
+- **Seen:** `make variants` on the step 10 code: 5 of 6 variants pass every hard check.
+  V-2043-historian-fails passes all its own checks (output produced, confidence `low`, no
+  `CHG-` citations, open questions) but fails the grader's `trace.concurrent`, overlap
+  0.00 s: the historian's span started and ended at 0.008 s, so it could not overlap the
+  analyst's. The injected fault raised at the start of the span, before the agent's CLI
+  session even opened, while D10 says the agent raises *on its first call*.
+- **Kind:** fault injection (D10), not the orchestrator: the fan-out was concurrent and
+  degraded as designed.
+- **Changed:** `--fail-agent` now raises once the agent's session is open and before its
+  first model call (`faults.before_first_call`); `--delay-agent` still sleeps at the start.
+  A real agent failure also happens after its CLI has started. With the real CLI the
+  failed historian's span is now about 1.7 s, with no model call made. The grader's
+  check prompted the look, and D10's wording decided the fix.
+
 ## Step 10 status
 
 Five full sweeps on the step 10 branch, as `make incidents` summaries:

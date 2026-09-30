@@ -185,6 +185,22 @@ def test_injected_fault_is_failed(settings, trace):
     assert events(trace)[-1]["status"] == "failed"
 
 
+def test_injected_fault_fires_on_the_first_call(settings, trace):
+    """D10: the session opens, then the agent raises before its first model call, so the
+    failed agent's span covers its start-up and the query is never sent."""
+    class Slow(FakeClient):
+        async def __aenter__(self):
+            await asyncio.sleep(0.05)  # stands in for the CLI starting
+            return self
+
+    client = Slow([([], result(GOOD))])
+    r = run(settings, trace, client, f=faults.parse([], ["log_analyst"], [], None))
+    assert r.status == "failed" and client.options is not None and client.sent == []
+    ev = events(trace)
+    start, end = ev[0], ev[-1]
+    assert end["status"] == "failed" and end["ts"] - start["ts"] >= 0.05
+
+
 def test_empty_tool_gives_empty_evidence(settings, trace):
     f = faults.parse(["search_logs"], [], [], None)
     r = run(settings, trace, FakeClient([(["pool"], result(GOOD))]), f=f)

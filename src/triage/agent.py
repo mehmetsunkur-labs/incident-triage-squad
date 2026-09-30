@@ -278,6 +278,7 @@ async def run_specialist(spec: SpecialistSpec, context: Any, settings: Settings,
                 options = _options(spec, settings, system_prompt, str(cwd or tmp), state, cap,
                                    stderr, debug_file)
                 async with client_factory(options) as client:
+                    faults_mod.before_first_call(spec.agent, faults)
                     await client.query(user)
                     msg = await _receive(client, span)
                     parsed, error, retryable = _parse(spec.output_model, msg)

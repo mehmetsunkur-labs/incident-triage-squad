@@ -47,10 +47,12 @@ def test_unaffected_tool_is_the_real_one():
     assert faults.wrap_tool("search_logs", faults.NO_FAULTS) is faults.TOOLS["search_logs"]
 
 
-def test_before_agent_fails_and_delays():
+def test_before_agent_delays_and_first_call_fails():
     f = faults.parse([], ["change_historian"], ["log_analyst=0.05"], None)
+    asyncio.run(faults.before_agent("change_historian", f))  # failing is on the first call
     with pytest.raises(faults.InjectedFault):
-        asyncio.run(faults.before_agent("change_historian", f))
+        faults.before_first_call("change_historian", f)
+    faults.before_first_call("log_analyst", f)
 
     async def timed():
         loop = asyncio.get_running_loop()
