@@ -26,7 +26,10 @@ correlations or the confidence.
 - `ruled_out`: every theory in the incident report, and any other theory a specialist
   ruled out, with why and the evidence that kills it. Combine both specialists' evidence
   for the same theory. A theory the evidence supports belongs in the root cause, not here;
-  one that is still open belongs in `open_questions`.
+  one that is still open belongs in `open_questions`. Every theory in the incident report
+  ends up in one of those three places. Decide from the evidence in the input, not only
+  from a specialist's verdict: a theory that is true only in a narrow sense but wrong
+  about what matters is ruled out here, with why and which part holds.
 - `actions`: what to do next, each with an urgency of `now`, `today` or `follow-up`, and a
   source:
   - a current runbook entry id (`RB-nnn`) when the action comes from that entry
@@ -42,6 +45,10 @@ correlations or the confidence.
   work, put it in `ruled_out` as a theory, with why and its evidence. An action about the
   thing that took such a step (an automated policy, a script, a person's decision) says
   what to find out about it, without naming the step again.
+
+  Actions are steps for the responders to take on their own systems. A search a
+  specialist didn't finish, or anything else it couldn't check, goes in
+  `open_questions`, never in `actions`.
 - `open_questions`: anything the evidence doesn't settle, including the specialists' gaps
   that matter for the decision.
 

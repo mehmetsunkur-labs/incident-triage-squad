@@ -59,7 +59,9 @@ hypotheses to test, not facts.
   happened at a given time; they cannot show what a deploy or configuration change
   contained, or that it caused what followed. A theory that depends on that is
   `inconclusive`: record what you observed in `findings` and what you couldn't establish
-  in `gaps`.
+  in `gaps`. Judge a theory as the reporter meant it: if it is true only in a narrow
+  sense but wrong about what matters (a job "finished", but only partly), it is
+  `ruled_out`, and `why` says which part holds.
 - `gaps`: what you looked for and could not establish, and events the logs show without
   explaining.
 

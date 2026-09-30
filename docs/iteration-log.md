@@ -185,6 +185,35 @@ listed here because they are the same kind of change.
   longer. No stall in 30 traced runs, no `api_retry`, first byte 1.5 s on average and
   7.5 s at worst.
 
+## 14. Synthesis followed a specialist too closely (step 10)
+
+- **Seen:** With entry 13's prompt, INC-2043 passed 10/10 (no action named the step;
+  scale-out in `ruled_out` 10/10), and INC-2051 and INC-2062 passed 9/10 each:
+  - INC-2051: the log analyst gave the reporter's "the job finished normally" a verdict
+    of `supported`, because the job did finish, though as `status=partial` (8 other runs
+    said `ruled_out`). The historian had the re-run theory `inconclusive`. Synthesis,
+    told that a supported theory belongs in the root cause, left both reporter theories
+    out of `ruled_out`. In a run where the analyst didn't check the theory at all,
+    synthesis ruled it out from the evidence itself.
+  - INC-2062: an action ended "The rollback search was not run", meaning the historian's
+    search for `rollback` had hit the cap; the grader reads it as rolling back search.
+    6/10 runs turned the historian's unfinished searches into actions ("finish the
+    change-log check that was cut short"), though the prompt already sent gaps to
+    `open_questions`.
+- **Kind:** prompt, in both cases a later stage copying an earlier one's call.
+- **Changed:**
+  - log analyst prompt: judge a theory as the reporter meant it; one true only in a
+    narrow sense but wrong about what matters is `ruled_out`, saying which part holds
+  - synthesis prompt: every theory in the report ends up in `ruled_out`, the root cause
+    or `open_questions`, decided from the evidence, not only a specialist's verdict
+  - synthesis prompt: actions are steps on the responders' systems; an unfinished search
+    or anything else a specialist couldn't check goes in `open_questions`
+- **Also seen:** the historian finished `partial` in 7/10 INC-2051 and 5/10 INC-2062 runs;
+  its unfinished searches are what the INC-2062 action came from, so the cap (entry 13) is
+  now a correctness question as well as a speed one. INC-2043's LEG-014 near miss was
+  missed once, when the runbook lookup's three searches never returned the archived entry.
+  No stall in 60 traced runs.
+
 ## Step 10 status
 
 Five full sweeps on the step 10 branch, as `make incidents` summaries:
@@ -209,5 +238,6 @@ Stability, as `make stability ID=<id> N=5` batches, runs passing every hard chec
 | A | + entry 11 tracing | 4/5 (entry 12) | | |
 | B | same | 5/5 | | |
 | C | + entry 12 prompt | 4/5 (entry 13) | 5/5 | 5/5 |
+| D, E | + entry 13 prompt, N=10 | 10/10 | 9/10 (entry 14) | 9/10 (entry 14) |
 
-Next: a batch of INC-2043 with N=10 on entry 13's prompt.
+Next: all three incidents with N=10 on entry 14's prompts.
