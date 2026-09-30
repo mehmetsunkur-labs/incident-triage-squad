@@ -41,4 +41,11 @@ make stability ID=INC-2043 N=5     # N runs graded together: pass rate per check
 ```
 
 Each graded run keeps a `grade.txt` next to its `result.json`. Variant and stability runs go
-to `out/variants/` and `out/stability/`, so they never count as an incident's newest run.
+to `out/variants/` and `out/stability/`, so they never count as an incident's newest run. Each
+`make stability` call gets its own batch folder, `out/stability/<id>/<batch-time>/`, and its
+`grade.txt` covers that batch's N runs only.
+
+To look into a slow or stalled agent, add `TRIAGE_SDK_DEBUG=1` (e.g. `TRIAGE_SDK_DEBUG=1 make
+stability ID=INC-2043 N=5`): each run folder then also gets the CLI's `debug-<agent>.log`.
+`trace.jsonl` always has each model reply and API retry, and `end` says where an agent stopped
+(contracts §9).

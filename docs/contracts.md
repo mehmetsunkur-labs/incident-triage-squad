@@ -401,7 +401,7 @@ reads, so `grade.py run ... --trace trace.jsonl` works unchanged. One JSON objec
 |---|---|---|
 | `ts` | number | Seconds since the run started (`time.monotonic()` offset). Not an ISO string: the grader does arithmetic on it. |
 | `agent` | enum | `log_analyst`, `change_historian`, `runbook_lookup`, `comms_drafter`, `synthesis` |
-| `type` | enum | `start`, `end`, `tool_call`, `input`, and any of our own: `tool_refused` (a call past the cap, D11, not counted as a tool call), `rate_limit` (the CLI's usage-limit status), and from the orchestrator `join` and `guardrail` |
+| `type` | enum | `start`, `end`, `tool_call`, `input`, and any of our own: `tool_refused` (a call past the cap, D11, not counted as a tool call), `rate_limit` (the CLI's usage-limit status), `sdk_message` (a model reply), `sdk_system` (a CLI system message other than init, e.g. `api_retry`), and from the orchestrator `join` and `guardrail` |
 | `tool` | string | On `tool_call` only. Must be the agent's own tool, by its plain name (`search_logs`), not the MCP-prefixed name the Agent SDK uses (D11). |
 | `payload` | string | On `input` only: the system prompt plus user message we send. Under the Agent SDK (D11) the harness may add more, which we cannot log. |
 
@@ -422,3 +422,17 @@ The grader's checks, and what they need from us:
   is logged.
 
 Extra fields (`query`, `status`, token counts) are ours; the grader ignores them.
+
+What our own events and `end` fields say, for reading a slow or stalled agent:
+
+| Where | Field | Meaning |
+|---|---|---|
+| `sdk_message` | `blocks` | What the reply held: `thinking` (chars; the API may return 0 when thinking is not shown), `text` (chars and a 200-char `preview`), `tool_use` (the SDK's tool name; not a `tool_call`, D11) |
+| `sdk_message` | `usage`, `message_id` | Input-side token usage, on the first block of each API call only (the CLI sends one message per block). The API reports it at the start of the response, so output tokens are only on `end` |
+| `sdk_message`, `sdk_system`, `rate_limit` | `since_prev_s` | Seconds since the CLI's previous message to this agent, or since `start` |
+| `sdk_system` | `subtype`, `data` | e.g. `api_retry` with `attempt`, `retry_delay_ms`, `error_status`. Not `thinking_tokens`: see `thinking` |
+| `end` | `messages`, `last_message`, `last_message_ts` | How many messages the CLI sent and the last one, so a timeout shows where it stopped |
+| `end` | `init_s`, `session_id` | Seconds until the CLI was ready; the Claude Code session id |
+| `end` | `api_s`, `usage`, `api_error_status` | From the result message, when there is one |
+| `end` | `thinking` | The CLI's thinking progress, summarised: `updates`, `est_tokens`, `first_ts`, `last_ts`. A long gap after `last_ts` before the next reply is the model writing, not thinking |
+| `end` | `stderr_lines` | Lines written to `stderr-<agent>.log`, when the CLI wrote any |

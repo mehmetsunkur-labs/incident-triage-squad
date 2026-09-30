@@ -338,3 +338,116 @@ def test_rate_limit_events_are_traced(settings, trace):
     run(settings, trace, Throttled([([], result(GOOD))]))
     [e] = [e for e in events(trace) if e["type"] == "rate_limit"]
     assert e["status"] == "allowed_warning" and e["utilization"] == 0.93
+
+
+def assistant(*blocks, usage=None):
+    from claude_agent_sdk import AssistantMessage
+    return AssistantMessage(content=list(blocks), model="m", usage=usage, message_id="msg_1")
+
+
+class Chatty(FakeClient):
+    """Yields what the CLI sends before its result: an API retry, then model replies."""
+
+    def __init__(self, script, before, sleep_after=0.0, **kw):
+        super().__init__(script, **kw)
+        self.before, self.sleep_after = before, sleep_after
+
+    async def receive_response(self):
+        for m in self.before:
+            yield m
+        await asyncio.sleep(self.sleep_after)
+        async for m in super().receive_response():
+            yield m
+
+
+RETRY = SystemMessage(subtype="api_retry", data={
+    "type": "system", "subtype": "api_retry", "session_id": "s", "uuid": "u",
+    "attempt": 2, "max_retries": 10, "retry_delay_ms": 4000, "error_status": 529, "error": "overloaded"})
+
+
+def test_model_replies_and_api_retries_are_traced(settings, trace):
+    from claude_agent_sdk import TextBlock, ThinkingBlock, ToolUseBlock
+    reply = assistant(ThinkingBlock(thinking="x" * 50, signature="sig"), TextBlock(text="Searching now."),
+                      ToolUseBlock(id="t1", name="mcp__triage__search_logs", input={"query": "pool"}),
+                      usage={"input_tokens": 10, "output_tokens": 5, "service_tier": "standard"})
+    second_block = assistant(TextBlock(text="More."), usage={"input_tokens": 10, "output_tokens": 5})
+    r = run(settings, trace, Chatty([(["pool"], result(GOOD))], [RETRY, reply, second_block]))
+    assert r.status == "ok"
+    ev = events(trace)
+    [retry] = [e for e in ev if e["type"] == "sdk_system"]
+    assert retry["subtype"] == "api_retry" and retry["data"]["error_status"] == 529
+    assert "type" not in retry["data"] and "session_id" not in retry["data"]
+    msg, again = [e for e in ev if e["type"] == "sdk_message"]
+    assert again["usage"] is None  # same API call as msg: its usage is not repeated
+    assert msg["blocks"] == [{"type": "thinking", "chars": 50},
+                             {"type": "text", "chars": 14, "preview": "Searching now."},
+                             {"type": "tool_use", "name": "mcp__triage__search_logs"}]
+    assert msg["usage"] == {"input_tokens": 10} and msg["since_prev_s"] >= 0  # output: see end
+    # tool_call events still come only from the tool wrapper, with the plain name (D11)
+    assert [e["tool"] for e in ev if e["type"] == "tool_call"] == ["search_logs"]
+    end = ev[-1]
+    assert end["messages"] == 5 and end["last_message"] == "result" and end["session_id"] is None
+    assert "init_s" in end and end["api_s"] == 0.0
+
+
+def test_timeout_end_says_where_it_stopped(settings, trace):
+    client = Chatty([([], result(GOOD))], [RETRY], sleep_after=5)
+    r = run(settings, trace, client, specialist_timeout_s=0.1)
+    assert r.status == "timeout"
+    end = events(trace)[-1]
+    assert end["status"] == "timeout" and end["messages"] == 1
+    assert end["last_message"] == "system:api_retry" and end["last_message_ts"] <= end["ts"]
+
+
+def test_large_system_data_is_reduced_to_keys(settings, trace):
+    big = SystemMessage(subtype="status", data={"type": "system", "blob": "x" * 5000, "n": 1})
+    run(settings, trace, Chatty([([], result(GOOD))], [big]))
+    [e] = [e for e in events(trace) if e["type"] == "sdk_system"]
+    assert e["data"] == {"keys": ["blob", "n"]}
+
+
+def test_cli_stderr_goes_to_a_file_beside_the_trace(settings, trace):
+    class Noisy(FakeClient):
+        async def receive_response(self):
+            self.options.stderr("API error 529 overloaded\n")
+            async for m in super().receive_response():
+                yield m
+
+    client = Noisy([([], result(GOOD))])
+    run(settings, trace, client)
+    log = trace.path.parent / "stderr-log_analyst.log"
+    assert log.read_text().rstrip().endswith("API error 529 overloaded")
+    assert events(trace)[-1]["stderr_lines"] == 1
+    assert client.options.extra_args == {}
+
+
+def test_no_stderr_file_when_the_cli_is_quiet(settings, trace):
+    run(settings, trace, FakeClient([([], result(GOOD))]))
+    assert not (trace.path.parent / "stderr-log_analyst.log").exists()
+    assert "stderr_lines" not in events(trace)[-1]
+
+
+def test_sdk_debug_asks_the_cli_for_a_debug_log(settings, trace):
+    client = FakeClient([([], result(GOOD))])
+    run(settings, trace, client, sdk_debug=True)
+    assert client.options.extra_args == {"debug-file": str(trace.path.parent / "debug-log_analyst.log")}
+
+
+def test_sdk_debug_from_env(monkeypatch):
+    monkeypatch.setenv("TRIAGE_SDK_DEBUG", "1")
+    assert load_settings().sdk_debug is True
+    monkeypatch.setenv("TRIAGE_SDK_DEBUG", "0")
+    assert load_settings().sdk_debug is False
+
+
+def test_thinking_progress_is_summarised_on_end(settings, trace):
+    def tick(total, delta):
+        return SystemMessage(subtype="thinking_tokens", data={
+            "type": "system", "subtype": "thinking_tokens",
+            "estimated_tokens": total, "estimated_tokens_delta": delta})
+
+    run(settings, trace, Chatty([([], result(GOOD))], [tick(50, 50), tick(240, 190), tick(50, 50)]))
+    ev = events(trace)
+    assert not [e for e in ev if e["type"] == "sdk_system"]
+    t = ev[-1]["thinking"]
+    assert t["updates"] == 3 and t["est_tokens"] == 290 and t["first_ts"] <= t["last_ts"]

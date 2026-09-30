@@ -26,6 +26,7 @@ class Settings:
     specialist_timeout_s: float = 150.0  # each specialist and the runbook lookup (D7; 90 s timed out a real run)
     synthesis_timeout_s: float = 180.0  # synthesis reads everything at high effort (D7, step 10)
     run_timeout_s: float = 600.0  # whole-run backstop; firing it is a bug, not a degraded run
+    sdk_debug: bool = False  # TRIAGE_SDK_DEBUG=1: the CLI writes a debug log per agent (D8, step 10)
 
 
 def resolve_data_dir(value: str | None = None) -> Path:
@@ -45,10 +46,13 @@ def resolve_data_dir(value: str | None = None) -> Path:
 
 
 def load_settings(data_dir: str | None = None, **overrides) -> Settings:
-    """Settings from .env; TRIAGE_OUT_DIR, if set, moves the output folder."""
+    """Settings from .env; TRIAGE_OUT_DIR, if set, moves the output folder, and
+    TRIAGE_SDK_DEBUG turns on the CLI's debug log."""
     data = resolve_data_dir(data_dir)
     if (out := os.environ.get("TRIAGE_OUT_DIR")) and "out_dir" not in overrides:
         overrides["out_dir"] = Path(out).resolve()
+    if os.environ.get("TRIAGE_SDK_DEBUG", "") not in ("", "0") and "sdk_debug" not in overrides:
+        overrides["sdk_debug"] = True
     return Settings(data_dir=data, **overrides)
 
 

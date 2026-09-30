@@ -217,6 +217,11 @@ Stack: Python, uv project, run locally as a CLI.
     message). Prompt files therefore must not contain `CHG-nnnn`, ISO timestamps or
     `file.log:n` examples, or the grader's context-leak check flags them.
   - Print a timing summary to stdout showing that the specialists overlap.
+  - Enough of the Agent SDK's message stream to explain a stall (step 10): each model reply
+    by kind and size, the CLI's system messages such as API retries, and on `end` where the
+    agent stopped. The CLI's stderr goes to `stderr-<agent>.log` in the run folder, and
+    `TRIAGE_SDK_DEBUG=1` adds the CLI's own debug log, `debug-<agent>.log`, which times the
+    first byte of every API request.
 - **Why:** Proves self-check #2 (concurrency) and gives run-to-run output to compare for
   stability. Matching the grader's format means `grade.py run --trace` works unchanged.
 
