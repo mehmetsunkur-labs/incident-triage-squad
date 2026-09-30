@@ -397,7 +397,8 @@ Stack: Python, uv project, run locally as a CLI.
 
 - **Question:** For the step 12 iteration prompt, which specialist gets a second question,
   when, with what context and budget, and how does its answer reach the join?
-- **Status:** proposed (drafted by Claude for review; not built)
+- **Status:** decided: not built. Drafted by Claude; kept as a design exercise for step 12.
+  What follows is the design as it would be built.
 - **Decision:**
   - **Who: the change historian.** The follow-up can't do what matters most for
     confidence, turning a weak link strong, because on INC-2062, the only incident that
@@ -482,6 +483,9 @@ Stack: Python, uv project, run locally as a CLI.
   - `contracts.md` §9: the `follow_up` event.
   - `config.py`: follow-up cap and timeout.
   - `cli.py`: the switch.
-- **Consider later:** asking the analyst instead when a weak link's changed value *could*
-  appear in the logs, but the analyst didn't search for it. None of the three incidents
-  needs that today.
+- **Consider later:**
+  - Building it, if the step 13 write-up or a new incident makes the historian's gaps on
+    weak links matter.
+  - Asking the analyst instead when a weak link's changed value *could* appear in the
+    logs, but the analyst didn't search for it. None of the three incidents needs that
+    today.
