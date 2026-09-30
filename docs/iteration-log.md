@@ -131,9 +131,63 @@ listed here because they are the same kind of change.
   - stopped running sweeps for the day rather than raising timeouts further to hide the
     throttling
 
+## 11. A stall the trace could not explain (step 10)
+
+- **Seen:** Run 5: INC-2043's change historian timed out at 150 s with no tool calls. Its
+  only event between `start` and `end` was a `rate_limit` at 21 s (1.4 s on the other two
+  incidents), and both INC-2043 specialists got theirs at about 21 s. The other two
+  incidents passed. The trace dropped every other SDK message, so it could not say whether
+  the CLI was retrying the API, the first response was queued, or the model was thinking,
+  and the result message that carries turns and usage never arrives on a timeout.
+- **Kind:** observability.
+- **Changed:** `sdk_message` and `sdk_system` events (the CLI's `api_retry` among them),
+  where it stopped on `end`, the CLI's stderr in `stderr-<agent>.log`, and
+  `TRIAGE_SDK_DEBUG=1` for the CLI's debug log with per-request time to first byte (D8,
+  contracts §9). No change to timeouts or retries until a stall has been captured.
+
+## 12. An action that warned against the forbidden step (step 10)
+
+- **Seen:** Two `make stability ID=INC-2043 N=5` batches with the entry 11 tracing, same
+  code: 9/10 runs passed every hard check. The failure was `actions.no_forbidden`:
+  synthesis wrote "Review the autoscaler policy... Adding replicas does not fix pool
+  exhaustion." The grader skips a phrase with a negation before it in the same clause, but
+  here the negation came after the phrase. 9 of the 10 runs had an action about the 19:52
+  scale-out.
+- **Kind:** prompt. A warning inside an action list is also poor for a responder skimming
+  it, so the rule isn't only for the grader.
+- **Changed:** synthesis prompt: actions are things to do; an approach the evidence shows
+  won't work goes in `ruled_out`. Not a code filter built from the grader's phrase list.
+- **Also seen (no change):** no stall in 10 runs, no `api_retry`, first byte 1.3 to 1.6 s on
+  average, 7.5 s at worst. The log analyst's run ends in a 35 to 43 s gap with no thinking
+  in it: writing its answer, 5,200 to 6,200 output tokens against the historian's 1,700 to
+  2,200. It is the critical path of the parallel stage.
+- **Tracing fixed:** per-reply usage keeps the input side only (the output count is a
+  start-of-response snapshot), and thinking progress is summarised on `end` instead of a
+  line per second.
+
+## 13. The warning rule moved theories, not the autoscaler action (step 10)
+
+- **Seen:** `make stability ID=INC-2043 N=5` with entry 12's prompt: 4/5 passed every hard
+  check. Scale-out was now in `ruled_out` in 5/5 runs (2/5 before) and the express checkout
+  flag in 3/5 (1/5), but 4/5 runs still had a follow-up about the autoscaler, and one said
+  "Consider whether autoscaling should be allowed to scale out a service whose failures
+  come from pool exhaustion": a question about the policy, not a warning, so the rule
+  didn't cover it. Across 15 INC-2043 runs, `actions.no_forbidden` failed twice.
+  With the same prompt, INC-2062 and INC-2051 passed 5/5 each, INC-2051 with no warnings.
+- **Kind:** prompt.
+- **Changed:** synthesis prompt: an action about what took a harmful step (an automated
+  policy, a script, a decision) says what to find out, without naming the step again.
+  `make stability` now writes each batch to its own folder, because the grade of the
+  earlier batch had been mixed with the next one's runs.
+- **Also seen (no change yet):** agents often use all 8 searches: INC-2051's historian 4/5
+  and analyst 3/5, INC-2062's runbook lookup 5/5 (a no-match incident, where it keeps
+  looking). Results didn't suffer, but runs that hit the cap write longer answers and take
+  longer. No stall in 30 traced runs, no `api_retry`, first byte 1.5 s on average and
+  7.5 s at worst.
+
 ## Step 10 status
 
-Four full sweeps on the step 10 branch, as `make incidents` summaries:
+Five full sweeps on the step 10 branch, as `make incidents` summaries:
 
 | Run | Changes in effect | INC-2043 | INC-2051 | INC-2062 |
 |---|---|---|---|---|
@@ -141,10 +195,19 @@ Four full sweeps on the step 10 branch, as `make incidents` summaries:
 | 2 | + 7 | FAIL: entry 8 | PASS | FAIL: entry 9 |
 | 3 | + 8, 9 | PASS | FAIL: timeout (entry 10) | **PASS** |
 | 4 | + 150 s timeouts | FAIL: throttled | PASS | FAIL: throttled |
+| 5 | same | FAIL: historian stalled (entry 11) | PASS | PASS |
 
 Every incident has passed every hard check at least once, and the join decided correctly
 in every run that got both specialists' results. There hasn't yet been a single run in
 which all three pass together; the failures after run 1 were prompt variance (each fixed
-once seen) and timeouts. What remains is **stability**, which is plan step 12: rerun
-`make incidents`, or `make stability ID=<id> N=5`, once usage limits have reset, and read
-the pass rate per check.
+once seen) and timeouts.
+
+Stability, as `make stability ID=<id> N=5` batches, runs passing every hard check:
+
+| Batch | Changes in effect | INC-2043 | INC-2051 | INC-2062 |
+|---|---|---|---|---|
+| A | + entry 11 tracing | 4/5 (entry 12) | | |
+| B | same | 5/5 | | |
+| C | + entry 12 prompt | 4/5 (entry 13) | 5/5 | 5/5 |
+
+Next: a batch of INC-2043 with N=10 on entry 13's prompt.

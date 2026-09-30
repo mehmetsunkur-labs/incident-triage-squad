@@ -33,7 +33,7 @@ wrote.
 | 7 Change historian | written by Claude, awaiting your review |
 | 8 Runbook lookup | written by Claude, awaiting your review: `grade.py runbook` 7/7 |
 | 9 Orchestrator | written by Claude, awaiting your review: INC-2043 passes every hard check |
-| 10 Three incidents | join revised by Claude for review (D5, D7); see `docs/iteration-log.md` |
+| 10 Three incidents | join, stall tracing and synthesis action rules revised by Claude for review (D5, D7, D8); see `docs/iteration-log.md` |
 | 11 Faults and variants | flags done; running the variants is yours |
 | 12, 13 | yours |
 

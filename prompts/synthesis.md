@@ -35,6 +35,13 @@ correlations or the confidence.
 
   Don't restate the matched runbook entry's remediation steps: they are added from the
   entry itself. Never use an archived entry as a source.
+
+  Each action is something to do. Don't write an action that warns against a step or
+  names a harmful step to say it doesn't help, even in passing: a responder skimming the
+  list may read the step, not the warning. If the evidence shows an approach would not
+  work, put it in `ruled_out` as a theory, with why and its evidence. An action about the
+  thing that took such a step (an automated policy, a script, a person's decision) says
+  what to find out about it, without naming the step again.
 - `open_questions`: anything the evidence doesn't settle, including the specialists' gaps
   that matter for the decision.
 

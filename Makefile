@@ -4,7 +4,7 @@
 # Runs go to separate folders so the "newest run" of an incident is never a fault-injected one:
 #   out/runs/<id>-<time>/                         make incidents, make incident-<id>
 #   out/variants/<variant>/runs/<id>-<time>/      make variants, make variant-<variant>
-#   out/stability/<id>/runs/<id>-<time>/          make stability ID=<id> N=<n>
+#   out/stability/<id>/<batch>/runs/<id>-<time>/  make stability ID=<id> N=<n>, one <batch> per call
 # Each graded run gets a grade.txt next to its result.json.
 
 SHELL := bash
@@ -102,5 +102,5 @@ variants:
 	 test -z "$$failed" || { echo "variants with hard failures or crashes:$$failed"; exit 1; }
 
 stability: check-grader
-	@dir=out/stability/$(ID); for i in $$(seq $(N)); do echo "== $(ID) run $$i of $(N)"; TRIAGE_OUT_DIR=$$dir $(TRIAGE) run $(ID) || true; done; \
+	@dir=out/stability/$(ID)/$$(date -u +%Y%m%dT%H%M%SZ); for i in $$(seq $(N)); do echo "== $(ID) run $$i of $(N)"; TRIAGE_OUT_DIR=$$dir $(TRIAGE) run $(ID) || true; done; \
 	 $(GRADE) run $(ID) $$dir/runs/$(ID)-20*/result.json | tee $$dir/grade.txt
