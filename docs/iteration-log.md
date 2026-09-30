@@ -274,3 +274,71 @@ What batch F still shows, none of it a hard failure:
   `open_questions`.
 - Runs take about 123 s (median), 171 s at worst, when every agent wrote long answers.
   No timeouts, failures or `api_retry` in 30 runs.
+
+## Step 12: iteration prompts
+
+Each prompt is an experiment on the step 11 code. Variant runs are in `out/variants/`, the
+runbook cases in `out/eval-runbook/`, and the stability batches in `out/stability/`.
+
+**One parallel agent fails** (V-2043-historian-fails). Degrades; it doesn't crash or hang.
+The historian fails on its first call at 1.3 s. The analyst carries on, the join has
+one side only (confidence `low`: "No result from change_historian"), and the runbook
+lookup still runs on the log symptom (RB-004). The root cause says it is not established,
+the logs' pool drop from 40 to 4 is reported as what is known, no `CHG-` id is cited, and
+10 open questions cover what's missing. This is D7's intended outcome. Getting there took
+entry 15: the injected fault first fired before the agent had started.
+
+**One parallel agent is slow** (V-2043-analyst-timeout). The historian finishes at 32 s.
+The fan-out then waits for the analyst until its 150 s timeout, cancels it (`timeout`,
+`CancelledError`), and goes on with the historian's result. Confidence is `low` ("No
+result from log_analyst (timeout)"). With no failure mode there is no symptom, so the
+runbook lookup is skipped and says why. The timeline is the three change records only,
+and the root cause names CHG-1042 as the leading candidate, not the cause. The run takes
+183 s: a slow agent costs the whole specialist timeout, which is D7's trade-off (no
+partial results from a cancelled agent). Confidence reflects it.
+
+**Confidence without the change log** (V-2043-no-changes, V-2051-no-changes). Confidence
+drops, as it should: `high` to `low` for both incidents ("No change is linked to the
+failing services within 48 hours"). The logs still carry each result. INC-2043 reports
+the pool exhaustion and matches RB-004, and INC-2051 reports the malformed message at
+offset 13188 and matches RB-007. Neither names a change as the cause.
+
+**No log results** (V-2043-no-logs). The system admits it has no timeline and invents
+none. The timeline is the three change records, the root cause is "not established"
+with CHG-1042 only as a candidate, confidence is `low`, and the runbook lookup is skipped
+for lack of a symptom. The summary's description of what customers saw comes from the
+incident report, not from logs.
+
+**Three tool calls per specialist** (V-2043-tool-cap-3, exploratory). Every hard check
+passes, and so do both soft checks. Confidence stays `high` on a strong CHG-1042 link.
+The specialists switch to broad queries: the analyst by severity (`ERROR`, `WARN`) and
+then all of checkout-service for the day, 20 of 37 lines returned, which included
+`max=4`. The historian searches by day. So on INC-2043 most of the 8 searches confirm
+what the first few found. The cap is not what makes runs slow: the analyst still took
+53 s and wrote 5,500 tokens, much as with 8 searches, because its time goes on writing
+the answer (entry 12). One run on the easiest incident: INC-2051 and INC-2062 depend on a
+specific value or node turning up, and aren't tested at 3.
+
+**"timeout" becomes "latency"** (RL-pool-latency, `make runbook`). Still RB-004, and all
+7 runbook cases pass. Neither the timeout nor the latency case searched either word:
+both searched `pool saturated`, `waiters` and `checkout pool`, the mechanism, which the
+symptom states either way and RB-004's Detection section names ("pool saturated or slow
+connection acquisition"). A lookup searching the surface word `timeout` would have
+broken, because the tool matches literally. Both considered the archived LEG-014 and
+rejected it. A related finding: with no match, the lookup keeps searching until the cap.
+RL-cpu-contention used all 8 searches and had a ninth refused (RL-peak-errors used 5),
+and INC-2062's lookup hit the cap in 10/10 runs. It still reached RB-000 each time.
+
+**A follow-up question to one specialist.** Not run: it changes the design, and needs D12
+in `decisions.md` first (plan step 12).
+
+**Five identical runs** (`make stability`, entries 11 to 14 and the stability table under
+step 10). On the final prompts, batch F: 10/10 runs of each incident pass every hard
+check, trace checks included. The unstable checks along the way were:
+- `actions.no_forbidden` on INC-2043 (entries 12 and 13)
+- the reporter's theories in `ruled_out` on INC-2051 (entry 14)
+- an unfinished search written as an action on INC-2062 (entry 14)
+
+Each was a prompt problem, fixed once seen. Still variable, as soft checks: the runbook
+near miss (8/10 for INC-2043 and INC-2051) and INC-2043's express checkout flag (7/10),
+both down to which entries the lookup's and historian's searches happen to return.
